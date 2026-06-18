@@ -52,6 +52,8 @@ REF = {
     "ld_pct": (15.0, 27.0),
     "pull_pct": (32.0, 48.0),
     "hr_fb": (6.0, 22.0),
+    "xiso": (0.090, 0.280),
+    "xslg": (0.330, 0.560),
 }
 
 # League-average fly-ball rate (FanGraphs batted-ball FB%); fly balls are the
@@ -72,11 +74,12 @@ HR_SCORE_WEIGHTS = {
 
 # Sub-weights inside the Statcast "power quality" score (sum to 1.0).
 POWER_QUALITY_WEIGHTS = {
-    "barrel_pct": 0.35,
-    "hard_hit_pct": 0.20,
-    "xwoba": 0.20,
-    "max_ev": 0.15,
-    "avg_ev": 0.10,
+    "barrel_pct": 0.30,
+    "xiso": 0.15,        # expected isolated power (xSLG - xBA)
+    "hard_hit_pct": 0.18,
+    "xwoba": 0.17,
+    "max_ev": 0.12,
+    "avg_ev": 0.08,
 }
 
 # Recent-form blend (sum to 1.0): the 7-day window is the loudest signal.
@@ -170,6 +173,7 @@ def environment_components(row: pd.Series) -> dict:
 def _power_quality_score(row: pd.Series) -> dict:
     subs = {
         "barrel_pct": scale(row.get("barrel_pct"), *REF["barrel_pct"]),
+        "xiso": scale(row.get("xiso"), *REF["xiso"]),
         "hard_hit_pct": scale(row.get("hard_hit_pct"), *REF["hard_hit_pct"]),
         "xwoba": scale(row.get("xwoba"), *REF["xwoba"]),
         "max_ev": scale(row.get("max_ev"), *REF["max_ev"]),

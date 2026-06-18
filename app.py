@@ -16,6 +16,7 @@ from src.history import (
     build_hr_history,
     calibration_table,
     hr_profile_centroid,
+    recent_trend,
     summarize_hr_profile,
     top5_by_category,
 )
@@ -47,12 +48,14 @@ def load_scored_slate(date_iso: str, prefer_live: bool):
 
 
 @st.cache_data(show_spinner="Analyzing trailing-month HR history…", ttl=60 * 60)
-def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool):
+def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_days: float):
     events, slate_hist, source, notes = build_hr_history(start_iso, end_iso, prefer_live)
     summary = summarize_hr_profile(events, slate_hist)
-    centroid = hr_profile_centroid(events)
+    # Recency-weighted centroid: recent HR hitters define "what's working now".
+    centroid = hr_profile_centroid(events, end_date_iso=end_iso, half_life_days=half_life_days)
     calib = calibration_table(slate_hist)
-    return events, summary, centroid, calib, source, notes
+    trend = recent_trend(events, end_iso, recent_days=7)
+    return events, summary, centroid, calib, trend, source, notes
 
 
 # --------------------------------------------------------------------------- #
@@ -77,6 +80,8 @@ GLOSSARY = {
     "Line-Drive%": "LD% — share of batted balls hit as line drives (real, FanGraphs). Great for hits, but line drives are usually too low to clear the wall.",
     "Pull%": "Share of batted balls hit to the pull side (real, FanGraphs). Pulled fly balls clear the wall most often, so pull power lifts the HR ceiling.",
     "HR/FB": "Home runs per fly ball (real, FanGraphs) — the fly-ball→HR conversion rate; a direct measure of game power. Drives a dedicated HR-rate multiplier.",
+    "xISO": "Expected Isolated Power = xSLG − xBA (real, Statcast) — pure expected power based on quality of contact, independent of luck/defense. Feeds the power-quality score.",
+    "xSLG": "Expected slugging (real, Statcast) — what a hitter's batted-ball quality should produce, regardless of outcomes.",
     "Avg EV": "Average exit velocity (mph).",
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
@@ -105,12 +110,19 @@ def sidebar_controls():
         "Backtest lookback (days)", min_value=7, max_value=45, value=31, step=1,
         help="Window of past HRs analyzed for the Trends tab (default ~1 month).",
     )
+    half_life = st.sidebar.slider(
+        "Trend strength — recency half-life (days)", min_value=2, max_value=30,
+        value=10, step=1,
+        help="How fast older HRs fade in the profile match. A 10-day half-life "
+             "means an HR from 10 days ago counts half as much as one today. "
+             "Lower = more reactive to the hottest recent profiles.",
+    )
     if st.sidebar.button("🔄 Refresh data", use_container_width=True):
         load_scored_slate.clear()
         load_hr_history.clear()
         st.rerun()
 
-    return game_date, prefer_live, lookback
+    return game_date, prefer_live, lookback, half_life
 
 
 def methodology_sidebar():
@@ -213,6 +225,8 @@ DISPLAY_COLUMNS = {
     "avg_ev": "Avg EV",
     "max_ev": "Max EV",
     "xwoba": "xwOBA",
+    "xiso": "xISO",
+    "xslg": "xSLG",
     "hr_per_pa": "HR/PA",
     "park_factor": "Park Factor",
     "wind_mult": "Wind x",
@@ -261,6 +275,8 @@ COLUMN_CONFIG = {
     "Avg EV": st.column_config.NumberColumn("Avg EV", help=GLOSSARY["Avg EV"], format="%.1f"),
     "Max EV": st.column_config.NumberColumn("Max EV", help=GLOSSARY["Max EV"], format="%.1f"),
     "xwOBA": st.column_config.NumberColumn("xwOBA", help=GLOSSARY["xwOBA"], format="%.3f"),
+    "xISO": st.column_config.NumberColumn("xISO", help=GLOSSARY["xISO"], format="%.3f"),
+    "xSLG": st.column_config.NumberColumn("xSLG", help=GLOSSARY["xSLG"], format="%.3f"),
     "HR/PA": st.column_config.NumberColumn("HR/PA", format="%.3f"),
     "Park Factor": st.column_config.NumberColumn("Park Factor", help=GLOSSARY["Park Factor"], format="%.0f"),
     "Recent Form": st.column_config.ProgressColumn(
@@ -361,7 +377,7 @@ def tab_consistent(df: pd.DataFrame):
     metric_bar_chart(df, "consistency_score", "Consistency Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "consistency_score",
             "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "avg_ev",
-            "contact_pct", "zone_contact_pct", "xwoba", "hr_per_pa", "rationale"]
+            "contact_pct", "zone_contact_pct", "xwoba", "xiso", "hr_per_pa", "rationale"]
     render_table(df.sort_values("consistency_score", ascending=False).head(40),
                  cols, "Consistency", "consistent")
 
@@ -434,13 +450,14 @@ def _top5_card_grid(tops: dict):
 
 
 def tab_trends(history, projection_slate):
-    events, summary, centroid, calib, source, notes, start_iso, end_iso = history
+    (events, summary, centroid, calib, trend, source, notes,
+     start_iso, end_iso, half_life) = history
     st.subheader("📈 HR Trends & Backtest")
     badge = "🟢" if source.startswith("LIVE") else "🟡"
     st.caption(
         f"{badge} **{source}** — every home run from **{start_iso} → {end_iso}**, the "
         "shared profile of who went deep, model calibration, and how today's bats "
-        "resemble recent HR hitters."
+        f"resemble recent HR hitters (recency half-life **{half_life}d**)."
     )
     with st.expander("Data provenance", expanded=False):
         for n in notes:
@@ -459,6 +476,15 @@ def tab_trends(history, projection_slate):
     st.markdown("##### 🔬 Shared profile of HR hitters vs. all hitters")
     st.caption("How much HR hitters out-index the slate baseline on each metric.")
     st.dataframe(summary["metric_table"], hide_index=True, use_container_width=True)
+
+    if trend is not None and not trend.empty:
+        st.markdown("##### 🔥 Trend strength — what's shifting among HR hitters (last 7d vs. window)")
+        st.caption(
+            "Positive = HR hitters' recent average on that metric is running hotter "
+            "than across the full window. The Profile Match uses a recency-weighted "
+            f"centroid (half-life {half_life}d), so these shifts steer today's ranks."
+        )
+        st.dataframe(trend, hide_index=True, use_container_width=True)
 
     cc1, cc2 = st.columns(2)
     with cc1:
@@ -524,7 +550,7 @@ def tab_trends(history, projection_slate):
 # Main
 # --------------------------------------------------------------------------- #
 def main():
-    game_date, prefer_live, lookback = sidebar_controls()
+    game_date, prefer_live, lookback, half_life = sidebar_controls()
     methodology_sidebar()
 
     st.title("⚾ MLB Home Run Projection Tool")
@@ -553,11 +579,12 @@ def main():
     # "resemblance to recent HR hitters" signal used by the Trends tab.
     start_iso = (game_date - dt.timedelta(days=lookback)).isoformat()
     end_iso = game_date.isoformat()
-    events, summary, centroid, calib, h_source, h_notes = load_hr_history(
-        start_iso, end_iso, prefer_live
+    events, summary, centroid, calib, trend, h_source, h_notes = load_hr_history(
+        start_iso, end_iso, prefer_live, float(half_life)
     )
     scored = add_profile_similarity(scored, centroid)
-    history = (events, summary, centroid, calib, h_source, h_notes, start_iso, end_iso)
+    history = (events, summary, centroid, calib, trend, h_source, h_notes,
+               start_iso, end_iso, half_life)
 
     filtered = filter_controls(scored)
     if filtered.empty:

@@ -70,6 +70,7 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | **Contact%** & swing-and-miss **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
 | **Chase%** (O-Swing%), **Zone-Contact%** (Z-Contact%), **Fly-Ball%** (FB%) | **FanGraphs** discipline + batted-ball via `pybaseball` | Modeled profiles |
 | **Ground-Ball%**, **Line-Drive%**, **Pull%**, **HR/FB** | **FanGraphs** batted-ball via `pybaseball` | Modeled profiles |
+| **xISO** (= xSLG − xBA) & **xSLG** (Statcast expected power) | **Baseball Savant** expected stats via `pybaseball` | Modeled profiles |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -188,9 +189,15 @@ then:
   offline simulation, outcomes are drawn from the model's own probabilities, so it
   illustrates the pipeline rather than proving accuracy.)
 - **Profile Match %** — a Gaussian-kernel similarity between each current hitter and
-  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, avg/max EV,
-  launch angle, and park factor. A blended **Calibrated** score = `0.85·HR Score +
-  0.15·Profile Match` and a **Top-5 list per category** are produced from it.
+  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, EV, max EV,
+  launch angle, whiff%, fly-ball%, pull%, HR/FB, **xISO**, and park factor. A blended
+  **Calibrated** score = `0.85·HR Score + 0.15·Profile Match` and a **Top-5 list per
+  category** are produced from it.
+- **Trend strength (recency weighting)** — the centroid is **recency-weighted** with a
+  configurable half-life (default 10 days): an HR from `h` days ago counts half as
+  much as one today, so the match tracks *what's going deep now*. A **"what's
+  shifting" table** compares HR hitters' last-7-day averages vs. the full window
+  (e.g. "Pull% / HR/FB / xISO trending up"), and those shifts steer today's ranks.
 
 Data path: LIVE pulls actual HR events from Baseball Savant
 (`pybaseball.statcast`); OFFLINE simulates outcomes deterministically from the

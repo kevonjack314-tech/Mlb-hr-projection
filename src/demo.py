@@ -374,6 +374,11 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     pull_pct = max(30.0, min(52.0, 38.0 + (tier - 3) * 2.0 + rng.uniform(-4.0, 4.0)))
     hr_fb = {1: 6.0, 2: 9.0, 3: 12.0, 4: 16.0, 5: 20.0}[tier] + (barrel - {1: 4.5, 2: 7.0, 3: 9.5, 4: 13.0, 5: 17.0}[tier]) * 0.4 + rng.uniform(-2.0, 2.0)
     hr_fb = max(3.0, min(28.0, hr_fb))
+    # Statcast expected power: xISO (= xSLG - xBA) and xSLG, contact-quality based.
+    xiso = {1: 0.110, 2: 0.140, 3: 0.175, 4: 0.215, 5: 0.255}[tier] + rng.uniform(-0.025, 0.025)
+    xiso = max(0.070, min(0.300, xiso))
+    xba_est = max(0.210, min(0.300, 0.250 + rng.uniform(-0.03, 0.03)))
+    xslg = round(xba_est + xiso, 3)
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -406,6 +411,8 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "ld_pct": round(ld_pct, 1),
         "pull_pct": round(pull_pct, 1),
         "hr_fb": round(hr_fb, 1),
+        "xiso": round(xiso, 3),
+        "xslg": xslg,
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),

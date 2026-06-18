@@ -88,3 +88,26 @@ def test_hr_history_and_profile():
     assert set(tops) == {"Overall (HR Score)", "Best Longshots",
                          "Consistent HR Hitters", "Sneaky HR Chances"}
     assert all(len(t) == 5 for t in tops.values())
+
+
+def test_expected_power_and_recency_trend():
+    from src.history import (build_hr_history, hr_profile_centroid, recent_trend,
+                             add_profile_similarity)
+    df = _slate()
+    # Expected-power metrics present and sane.
+    assert "xiso" in df.columns and df.xiso.between(0.05, 0.35).all()
+    assert "xslg" in df.columns
+
+    events, _, _, _ = build_hr_history("2026-05-18", "2026-06-18", prefer_live=False)
+    # Recency-weighted centroid records its half-life and includes xISO.
+    cen = hr_profile_centroid(events, end_date_iso="2026-06-18", half_life_days=7)
+    assert cen["half_life_days"] == 7
+    assert "xiso" in cen["centroid"]
+    # Unweighted fallback when no date/half-life.
+    flat = hr_profile_centroid(events, end_date_iso=None, half_life_days=0)
+    assert flat["half_life_days"] is None
+    # Profile match still valid with the recency centroid.
+    assert add_profile_similarity(df, cen)["profile_match"].between(0, 100).all()
+    # Trend table is non-empty and ranks by movement.
+    tr = recent_trend(events, "2026-06-18", recent_days=7)
+    assert not tr.empty and "Trend" in tr.columns

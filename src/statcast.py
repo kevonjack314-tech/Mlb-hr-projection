@@ -140,7 +140,22 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     except Exception:
         pass
 
+    # Merge Statcast expected stats (quality-of-contact power) by MLBAM id.
+    # xISO = expected SLG - expected BA: pure expected power, contact-quality based.
+    try:
+        xs = pyb.statcast_batter_expected_stats(year, minPA=10)
+        xs = xs.rename(columns={"player_id": "mlbam_id"})
+        if "est_slg" in xs.columns and "est_ba" in xs.columns:
+            xs["xiso"] = xs["est_slg"] - xs["est_ba"]
+            xs_small = xs[["mlbam_id", "est_slg", "xiso"]].rename(columns={"est_slg": "xslg"})
+            table = table.merge(xs_small, on="mlbam_id", how="left")
+    except Exception:
+        pass
+
     # Derive / clean fields.
+    for col in ("xiso", "xslg"):
+        if col not in table:
+            table[col] = np.nan
     if "pa" not in table:
         table["pa"] = np.nan
     if "season_hr" not in table:
@@ -276,6 +291,7 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "chase_pct": g("chase_pct"), "zone_contact_pct": g("zone_contact_pct"),
         "fb_pct": g("fb_pct"), "gb_pct": g("gb_pct"), "ld_pct": g("ld_pct"),
         "pull_pct": g("pull_pct"), "hr_fb": g("hr_fb"),
+        "xiso": g("xiso"), "xslg": g("xslg"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }
