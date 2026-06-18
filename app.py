@@ -68,6 +68,7 @@ GLOSSARY = {
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
     "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
     "Hard-Hit%": "Share of batted balls ≥95 mph exit velocity.",
+    "Whiff%": "Swing-and-miss rate = swings that miss / total swings (real, from FanGraphs Contact%). High whiff = more boom-or-bust, lower contact floor.",
     "Avg EV": "Average exit velocity (mph).",
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
@@ -192,6 +193,7 @@ DISPLAY_COLUMNS = {
     "sneaky_score": "Sneaky",
     "barrel_pct": "Barrel%",
     "hard_hit_pct": "Hard-Hit%",
+    "whiff_pct": "Whiff%",
     "avg_ev": "Avg EV",
     "max_ev": "Max EV",
     "xwoba": "xwOBA",
@@ -231,6 +233,7 @@ COLUMN_CONFIG = {
     ),
     "Barrel%": st.column_config.NumberColumn("Barrel%", help=GLOSSARY["Barrel%"], format="%.1f"),
     "Hard-Hit%": st.column_config.NumberColumn("Hard-Hit%", help=GLOSSARY["Hard-Hit%"], format="%.1f"),
+    "Whiff%": st.column_config.NumberColumn("Whiff%", help=GLOSSARY["Whiff%"], format="%.1f"),
     "Avg EV": st.column_config.NumberColumn("Avg EV", help=GLOSSARY["Avg EV"], format="%.1f"),
     "Max EV": st.column_config.NumberColumn("Max EV", help=GLOSSARY["Max EV"], format="%.1f"),
     "xwOBA": st.column_config.NumberColumn("xwOBA", help=GLOSSARY["xwOBA"], format="%.3f"),
@@ -316,8 +319,8 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
-            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "park_factor",
-            "wind_mult", "rationale"]
+            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "whiff_pct",
+            "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
 
@@ -333,7 +336,7 @@ def tab_consistent(df: pd.DataFrame):
     metric_bar_chart(df, "consistency_score", "Consistency Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "consistency_score",
             "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "avg_ev",
-            "xwoba", "hr_per_pa", "rationale"]
+            "whiff_pct", "xwoba", "hr_per_pa", "rationale"]
     render_table(df.sort_values("consistency_score", ascending=False).head(40),
                  cols, "Consistency", "consistent")
 

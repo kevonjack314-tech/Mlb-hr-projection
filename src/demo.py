@@ -356,6 +356,10 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     la = rng.uniform(8, 19)  # sweet-spot launch ~ 8-19 deg
     xwoba = {1: 0.300, 2: 0.320, 3: 0.340, 4: 0.365, 5: 0.395}[tier] + rng.uniform(-0.02, 0.02)
     k_pct = {1: 18, 2: 21, 3: 23, 4: 25, 5: 26}[tier] + rng.uniform(-3, 3)
+    # Swing-and-miss (whiff%) = swings that miss / swings. Power hitters tend to
+    # swing-and-miss more; it tracks K% but is a distinct, swing-level signal.
+    whiff_pct = {1: 18.0, 2: 21.0, 3: 24.0, 4: 27.0, 5: 30.0}[tier] + rng.uniform(-3.5, 3.5)
+    whiff_pct = max(10.0, min(40.0, whiff_pct + (k_pct - {1: 18, 2: 21, 3: 23, 4: 25, 5: 26}[tier]) * 0.5))
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -379,6 +383,7 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "launch_angle": round(la, 1),
         "xwoba": round(xwoba, 3),
         "k_pct": round(max(10.0, k_pct), 1),
+        "whiff_pct": round(whiff_pct, 1),
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),

@@ -125,8 +125,11 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
         fg = fg.rename(columns={"Name": "name_full"})
         fg["name_key"] = fg["name_full"].map(normalize_name)
         cols = {}
+        # 'Contact%' and 'SwStr%' are FanGraphs plate-discipline rates we use to
+        # derive real swing-and-miss (whiff) rate; whiff% = 100 - Contact%.
         for src, dst in [("PA", "pa"), ("HR", "season_hr"), ("K%", "k_pct"),
-                         ("xwOBA", "xwoba"), ("SO", "so")]:
+                         ("xwOBA", "xwoba"), ("SO", "so"),
+                         ("Contact%", "contact_pct"), ("SwStr%", "swstr_pct")]:
             if src in fg.columns:
                 cols[src] = dst
         fg_small = fg[["name_key"] + list(cols)].rename(columns=cols)
@@ -145,6 +148,15 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
         table["k_pct"] = np.nan
     if "xwoba" not in table:
         table["xwoba"] = np.nan
+
+    # Real swing-and-miss (whiff) rate: prefer 100 - Contact%; if Contact% is
+    # missing, approximate from SwStr% (whiffs/pitch) which runs ~0.45x of whiff%.
+    if "contact_pct" in table:
+        table["whiff_pct"] = 100.0 - table["contact_pct"].map(_coerce_pct)
+    elif "swstr_pct" in table:
+        table["whiff_pct"] = table["swstr_pct"].map(_coerce_pct) / 0.45
+    else:
+        table["whiff_pct"] = np.nan
 
     table["hr_per_pa"] = (table["season_hr"] / table["pa"]).replace([np.inf, -np.inf], np.nan)
     table["power_tier"] = table["barrel_pct"].map(_tier_from_barrel)
@@ -246,7 +258,8 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "barrel_pct": g("barrel_pct"), "hard_hit_pct": g("hard_hit_pct"),
         "avg_ev": g("avg_ev"), "max_ev": g("max_ev"),
         "launch_angle": g("launch_angle"), "xwoba": g("xwoba"),
-        "k_pct": g("k_pct"), "pa": g("pa"), "season_hr": g("season_hr"),
+        "k_pct": g("k_pct"), "whiff_pct": g("whiff_pct"),
+        "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }
     # Drop keys that are None so the caller can fill gaps from the modeled profile.

@@ -44,6 +44,7 @@ REF = {
     "hr_per_pa": (0.010, 0.070),
     "recent_hr_rate": (0.010, 0.080),
     "k_pct": (15.0, 32.0),
+    "whiff_pct": (15.0, 35.0),
 }
 
 # --- Composite HR Score weights (must sum to 1.0). ---
@@ -184,6 +185,12 @@ def score_row(row: pd.Series) -> dict:
     recent_rate = _recent_form_rate(row)
     recent_form_score = scale(recent_rate, *REF["recent_hr_rate"])
     k_score = scale(row.get("k_pct"), *REF["k_pct"])  # high = strikeout-prone
+    # Swing-and-miss (whiff) rate: high = more boom-or-bust, lower contact floor.
+    # Fall back to the K% signal when whiff isn't available.
+    whiff_raw = row.get("whiff_pct")
+    whiff_score = scale(whiff_raw, *REF["whiff_pct"]) if whiff_raw is not None else k_score
+    # Combined swing-and-miss signal (whiff weighted over K%).
+    swing_miss_score = 0.6 * whiff_score + 0.4 * k_score
 
     matchup_mult, matchup_score = matchup_multiplier(row)
     env = environment_components(row)
@@ -197,6 +204,7 @@ def score_row(row: pd.Series) -> dict:
     out["barrel_score"] = round(pq["_pq_subs"]["barrel_pct"], 1)
     out["max_ev_score"] = round(pq["_pq_subs"]["max_ev"], 1)
     out["hard_hit_score"] = round(pq["_pq_subs"]["hard_hit_pct"], 1)
+    out["whiff_score"] = round(whiff_score, 1)
 
     # --- Composite HR Score (0-100) ---
     hr_score = (
@@ -236,14 +244,15 @@ def score_row(row: pd.Series) -> dict:
         + 0.20 * env["env_score"]
         + 0.10 * matchup_score
     )
-    # Reward variance (higher K% = more boom-or-bust) and slightly de-emphasize
-    # players who are already chalk (very high probability is not a "longshot").
-    variance_bonus = 1.0 + (k_score - 50.0) / 500.0   # ±0.10
+    # Reward variance (more swing-and-miss = more boom-or-bust) and slightly
+    # de-emphasize players who are already chalk (high prob is not a "longshot").
+    variance_bonus = 1.0 + (swing_miss_score - 50.0) / 500.0   # ±0.10
     chalk_penalty = 1.0 - max(0.0, (out["hr_prob_game"] - 0.12)) * 0.5
     out["longshot_score"] = round(float(np.clip(longshot * variance_bonus * chalk_penalty, 0, 100)), 1)
 
     # --- Consistency Score (high floor) ---
-    contact_floor = 100.0 - k_score
+    # Floor rewards bat-to-ball skill: low swing-and-miss (whiff) and low K%.
+    contact_floor = 100.0 - swing_miss_score
     confidence = float(np.clip(row.get("pa", 200) / 450.0, 0.6, 1.0))  # sample-size trust
     consistency = (
         0.28 * out["hard_hit_score"]

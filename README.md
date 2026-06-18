@@ -67,6 +67,7 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | Park factors & dimensions | Bundled `data/park_factors.csv` (Statcast/ESPN-calibrated) | same (bundled) |
 | Hitter Statcast (barrel%, EV, max EV, LA) | **Baseball Savant** exit-velo & barrels leaderboard via `pybaseball` | Deterministic modeled profiles |
 | Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
+| Swing-and-miss / **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -195,11 +196,15 @@ modeled slates so the whole analysis runs without network.
 
 ### 6. Specialized scores
 
+- **Swing-and-miss signal** = `0.6·Whiff% + 0.4·K%` (normalized). Real **Whiff%**
+  (swing-and-miss rate = 100 − Contact%) is the primary input; K% is the fallback.
+  It drives both of the next two scores.
 - **Longshot** = `0.45·MaxEV + 0.25·Barrel + 0.20·Env + 0.10·Matchup`, then
-  nudged by a **variance bonus** (higher K% = more boom-or-bust) and a **chalk
-  penalty** (already-high-probability bats aren't true "longshots").
-- **Consistency** = `0.28·HardHit + 0.22·Contact(low-K) + 0.20·SeasonHR +
-  0.15·AvgEV + 0.15·xwOBA`, scaled by a sample-size confidence factor.
+  nudged by a **variance bonus** (more swing-and-miss = more boom-or-bust) and a
+  **chalk penalty** (already-high-probability bats aren't true "longshots").
+- **Consistency** = `0.28·HardHit + 0.22·ContactFloor + 0.20·SeasonHR +
+  0.15·AvgEV + 0.15·xwOBA`, where **ContactFloor = 100 − swing-and-miss signal**
+  (rewards bat-to-ball skill), scaled by a sample-size confidence factor.
 - **Sneaky** = `0.30·Matchup + 0.25·Env + 0.25·FormGap + 0.20·UnderRadar`, where
   *FormGap* rewards bats heating up beyond their season line and *UnderRadar*
   favors lower-profile hitters who still have real batted-ball pop.
