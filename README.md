@@ -59,15 +59,40 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | Schedule, probable pitchers, rosters/lineups | **MLB StatsAPI** (`statsapi.mlb.com`, no key) | Synthetic slate (`src/demo.py`) |
 | Weather (temp, wind speed/direction, humidity) | **Open-Meteo** forecast at park lat/lon (no key) | Synthetic / neutral |
 | Park factors & dimensions | Bundled `data/park_factors.csv` (Statcast/ESPN-calibrated) | same (bundled) |
-| Hitter Statcast (barrel%, EV, xwOBA…) | Hook for `pybaseball` Statcast leaderboards (stub) | Deterministic modeled profiles |
+| Hitter Statcast (barrel%, EV, max EV, LA) | **Baseball Savant** exit-velo & barrels leaderboard via `pybaseball` | Deterministic modeled profiles |
+| Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
+| Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
+
+Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
+hitter starts from a modeled profile, then real season metrics and real recent-form
+HR rates overlay wherever they resolve (matched by MLBAM id, then by normalized
+name). So the slate is **real where live data exists and modeled only to fill
+gaps** — and the **Data** column / provenance panel tells you exactly which rows
+are `real` vs `modeled`, plus the overall coverage %.
 
 The live path is fully **defensive**: any failed fetch downgrades just that piece
 (or the whole slate) to the synthetic path and records a note in the **Data
 provenance** panel, so you always know exactly where each number came from.
 
-> **Wiring real Statcast metrics:** implement `src/sources.py::_statcast_lookup`
-> to return a season profile per player (e.g. via `pybaseball`'s
-> `statcast_batter_exitvelo_barrels`). Nothing else in the pipeline needs to change.
+### ⚠️ Enabling live data (network egress allowlist)
+
+`pip install -r requirements.txt` installs `pybaseball`, which is all that's
+needed for live data **on an open network**. In a sandboxed environment (e.g.
+Claude Code on the web) outbound access is governed by an **egress allowlist**;
+until these hosts are added, every fetch returns `host_not_allowed` and the app
+runs on the synthetic demo slate:
+
+```
+statsapi.mlb.com          # schedule, probable pitchers, rosters/lineups
+baseballsavant.mlb.com    # Statcast batted-ball metrics + recent-form events
+www.fangraphs.com         # season PA / HR / K% / xwOBA
+api.open-meteo.com        # weather (temp, wind, humidity)
+```
+
+Add them in your environment's **network egress settings** (see
+<https://code.claude.com/docs/en/claude-code-on-the-web>). With the hosts allowed
+and `pybaseball` installed, flip the sidebar **"Try live data"** toggle on and the
+source badge changes to **🟢 LIVE (real Statcast)**.
 
 ---
 
@@ -162,8 +187,11 @@ pitcher faced with a platoon advantage is the juiciest matchup.
   the offline demo; it is not guaranteed to match today's exact active rosters.
 - **Park factors** are static seasonal estimates; refresh `data/park_factors.csv`
   annually.
-- Statcast batted-ball metrics are **modeled** until you wire a live feed via
-  `_statcast_lookup` (see above).
+- The recent-form pull (Statcast date-range) is heavy on first call; it is cached
+  in-process and on disk (`pybaseball` cache) and refreshed via the sidebar button.
+- Pitcher matchup peripherals (HR/9, FB%, barrels allowed) are currently modeled;
+  the hitter Statcast, season stats, and recent-form HR rates are **live** when the
+  hosts above are allowlisted.
 
 ---
 
@@ -179,7 +207,8 @@ pitcher faced with a platoon advantage is the juiciest matchup.
 │   ├── parks.py            # park / wind / temp / humidity multipliers
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
-│   └── sources.py          # live MLB StatsAPI + Open-Meteo, defensive fallback
+│   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
+│   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme
 ```
 

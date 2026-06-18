@@ -462,6 +462,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "home_team": home,
                     "is_home": side == "home",
                     "game": f"{away} @ {home}",
+                    "data_quality": "modeled",
                     "temp_f": temp,
                     "wind_mph": wind_speed,
                     "wind_dir_deg": wind_dir,

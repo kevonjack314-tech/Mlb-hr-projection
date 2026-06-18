@@ -193,19 +193,36 @@ def fetch_weather(home_abbr: str, date_iso: str, hour: int = 19) -> dict:
     return {"temp_f": temp, "wind_mph": wind, "wind_dir_deg": wdir, "humidity_pct": humid}
 
 
-def _hitter_metrics(name: str, bats: str, slate_seed: str) -> dict:
-    """Attach hitter Statcast metrics.
+def season_year_for(game_date: dt.date) -> int:
+    """The MLB stats season relevant to a date (offseason -> prior season)."""
+    return game_date.year if game_date.month >= 4 else game_date.year - 1
 
-    Hook point for real Statcast leaderboards (pybaseball). Currently uses the
-    deterministic synthetic profile keyed by name; replace `_statcast_lookup`
-    to wire live batted-ball data without touching the rest of the pipeline.
+
+def _hitter_metrics(name: str, bats: str, slate_seed: str, mlbam_id, year: int,
+                    end_date_iso: str) -> tuple[dict, bool]:
+    """Attach hitter Statcast metrics. Returns (profile, used_real_data).
+
+    Strategy: start from the deterministic modeled profile (guarantees every
+    field), then overlay any REAL season metrics (barrel%, EV, xwOBA, HR/PA…)
+    and REAL recent-form HR rates that we can resolve from Statcast/FanGraphs.
+    So the result is real wherever live data exists and modeled only to fill
+    gaps — and it never crashes if the live feeds are blocked.
     """
-    real = _statcast_lookup(name)
-    if real is not None:
-        return real
-    # Tier inferred from the demo pool if the player is known, else neutral (3).
     tier = _known_tier(name)
-    return demo._hitter_profile(name, bats, tier, slate_seed)
+    profile = dict(demo._hitter_profile(name, bats, tier, slate_seed))
+    used_real = False
+
+    real = _statcast_lookup(name, mlbam_id, year)
+    if real:
+        profile.update(real)
+        used_real = True
+
+    recent = _recent_form_lookup(end_date_iso, mlbam_id)
+    if recent:
+        profile.update(recent)
+        used_real = True
+
+    return profile, used_real
 
 
 @lru_cache(maxsize=1)
@@ -221,14 +238,24 @@ def _known_tier(name: str) -> int:
     return _name_to_tier().get(name, 3)
 
 
-def _statcast_lookup(name: str):
-    """Return a real Statcast profile dict for `name`, or None if unavailable.
+def _statcast_lookup(name: str, mlbam_id=None, year: int | None = None):
+    """Return a real season Statcast/FanGraphs profile dict, or None."""
+    try:
+        from . import statcast
+        if year is None:
+            year = season_year_for(dt.date.today())
+        return statcast.lookup_season(year, name, mlbam_id)
+    except Exception:
+        return None
 
-    Left as a stub that returns None by default (keeps the tool dependency-light
-    and offline-safe). Implement with pybaseball's
-    `statcast_batter_exitvelo_barrels` season leaderboard to go fully live.
-    """
-    return None
+
+def _recent_form_lookup(end_date_iso: str, mlbam_id=None):
+    """Return real {hr_rate_7,15,30} for a batter, or None."""
+    try:
+        from . import statcast
+        return statcast.lookup_recent_form(end_date_iso, mlbam_id)
+    except Exception:
+        return None
 
 
 def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str) -> dict:
@@ -249,6 +276,9 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         return None, ["No live schedule available for this date."]
 
     slate_seed = date_iso
+    year = season_year_for(game_date)
+    real_hitters = 0
+    total_hitters = 0
     rows = []
     for g in games:
         home, away = g["home"], g["away"]
@@ -275,7 +305,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
             for pid, name, bats, pos in roster:
                 if not name:
                     continue
-                metrics = _hitter_metrics(name, bats, slate_seed)
+                metrics, used_real = _hitter_metrics(
+                    name, bats, slate_seed, pid, year, date_iso
+                )
+                total_hitters += 1
+                real_hitters += int(used_real)
                 row = {
                     "player": name,
                     "team": team,
@@ -286,6 +320,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "home_team": home,
                     "is_home": side == "home",
                     "game": f"{away} @ {home}",
+                    "data_quality": "real" if used_real else "modeled",
                 }
                 row.update(weather)
                 row.update(metrics)
@@ -295,14 +330,25 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
     if not rows:
         return None, notes + ["Live games found but no hitters resolved."]
     notes.append(f"Live schedule: {len(games)} games from MLB StatsAPI.")
-    notes.append("Batted-ball metrics are modeled (synthetic) unless a Statcast feed is wired in.")
+    if real_hitters:
+        pct = 100 * real_hitters / max(1, total_hitters)
+        notes.append(
+            f"Real Statcast/FanGraphs metrics resolved for {real_hitters}/"
+            f"{total_hitters} hitters ({pct:.0f}%); remainder modeled."
+        )
+    else:
+        notes.append(
+            "Statcast/FanGraphs feed unavailable (host not allowlisted or "
+            "pybaseball missing) — batted-ball metrics modeled. See README."
+        )
     return pd.DataFrame(rows), notes
 
 
 def get_slate(game_date: dt.date, prefer_live: bool = True) -> tuple[pd.DataFrame, str, list[str]]:
     """Return (slate_df, source_label, notes).
 
-    source_label is one of: 'LIVE (modeled metrics)', 'DEMO (synthetic)'.
+    source_label is one of: 'LIVE (real Statcast)', 'LIVE (modeled metrics)',
+    'DEMO (synthetic)'.
     """
     notes: list[str] = []
     if prefer_live:
@@ -310,7 +356,9 @@ def get_slate(game_date: dt.date, prefer_live: bool = True) -> tuple[pd.DataFram
             df, live_notes = build_live_slate(game_date)
             notes.extend(live_notes)
             if df is not None and not df.empty:
-                return df, "LIVE (modeled metrics)", notes
+                has_real = "data_quality" in df.columns and (df["data_quality"] == "real").any()
+                label = "LIVE (real Statcast)" if has_real else "LIVE (modeled metrics)"
+                return df, label, notes
         except Exception as exc:  # pragma: no cover - defensive
             notes.append(f"Live fetch failed: {exc}")
     df = demo.build_demo_slate(game_date)

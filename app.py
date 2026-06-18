@@ -174,6 +174,7 @@ DISPLAY_COLUMNS = {
     "wind_mult": "Wind x",
     "temp_f": "Temp °F",
     "recent_form_score": "Recent Form",
+    "data_quality": "Data",
     "rationale": "Rationale",
     "sneaky_reasons": "Sneaky Reasons",
 }
