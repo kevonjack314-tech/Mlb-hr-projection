@@ -384,6 +384,7 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "xwoba": round(xwoba, 3),
         "k_pct": round(max(10.0, k_pct), 1),
         "whiff_pct": round(whiff_pct, 1),
+        "contact_pct": round(100.0 - whiff_pct, 1),
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),

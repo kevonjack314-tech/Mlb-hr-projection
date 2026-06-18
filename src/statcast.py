@@ -157,6 +157,9 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
         table["whiff_pct"] = table["swstr_pct"].map(_coerce_pct) / 0.45
     else:
         table["whiff_pct"] = np.nan
+    # Contact% is the complement of whiff (contact made / swings); keep them
+    # perfectly consistent and on a 0-100 percent scale.
+    table["contact_pct"] = 100.0 - table["whiff_pct"]
 
     table["hr_per_pa"] = (table["season_hr"] / table["pa"]).replace([np.inf, -np.inf], np.nan)
     table["power_tier"] = table["barrel_pct"].map(_tier_from_barrel)
@@ -258,7 +261,7 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "barrel_pct": g("barrel_pct"), "hard_hit_pct": g("hard_hit_pct"),
         "avg_ev": g("avg_ev"), "max_ev": g("max_ev"),
         "launch_angle": g("launch_angle"), "xwoba": g("xwoba"),
-        "k_pct": g("k_pct"), "whiff_pct": g("whiff_pct"),
+        "k_pct": g("k_pct"), "whiff_pct": g("whiff_pct"), "contact_pct": g("contact_pct"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }

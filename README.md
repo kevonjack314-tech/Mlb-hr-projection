@@ -67,7 +67,7 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | Park factors & dimensions | Bundled `data/park_factors.csv` (Statcast/ESPN-calibrated) | same (bundled) |
 | Hitter Statcast (barrel%, EV, max EV, LA) | **Baseball Savant** exit-velo & barrels leaderboard via `pybaseball` | Deterministic modeled profiles |
 | Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
-| Swing-and-miss / **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
+| **Contact%** & swing-and-miss **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each

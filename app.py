@@ -69,6 +69,7 @@ GLOSSARY = {
     "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
     "Hard-Hit%": "Share of batted balls ≥95 mph exit velocity.",
     "Whiff%": "Swing-and-miss rate = swings that miss / total swings (real, from FanGraphs Contact%). High whiff = more boom-or-bust, lower contact floor.",
+    "Contact%": "Contact rate = contact made / swings (real, from FanGraphs); the complement of Whiff%. High contact = better bat-to-ball skill / higher floor.",
     "Avg EV": "Average exit velocity (mph).",
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
@@ -194,6 +195,7 @@ DISPLAY_COLUMNS = {
     "barrel_pct": "Barrel%",
     "hard_hit_pct": "Hard-Hit%",
     "whiff_pct": "Whiff%",
+    "contact_pct": "Contact%",
     "avg_ev": "Avg EV",
     "max_ev": "Max EV",
     "xwoba": "xwOBA",
@@ -234,6 +236,7 @@ COLUMN_CONFIG = {
     "Barrel%": st.column_config.NumberColumn("Barrel%", help=GLOSSARY["Barrel%"], format="%.1f"),
     "Hard-Hit%": st.column_config.NumberColumn("Hard-Hit%", help=GLOSSARY["Hard-Hit%"], format="%.1f"),
     "Whiff%": st.column_config.NumberColumn("Whiff%", help=GLOSSARY["Whiff%"], format="%.1f"),
+    "Contact%": st.column_config.NumberColumn("Contact%", help=GLOSSARY["Contact%"], format="%.1f"),
     "Avg EV": st.column_config.NumberColumn("Avg EV", help=GLOSSARY["Avg EV"], format="%.1f"),
     "Max EV": st.column_config.NumberColumn("Max EV", help=GLOSSARY["Max EV"], format="%.1f"),
     "xwOBA": st.column_config.NumberColumn("xwOBA", help=GLOSSARY["xwOBA"], format="%.3f"),
@@ -336,7 +339,7 @@ def tab_consistent(df: pd.DataFrame):
     metric_bar_chart(df, "consistency_score", "Consistency Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "consistency_score",
             "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "avg_ev",
-            "whiff_pct", "xwoba", "hr_per_pa", "rationale"]
+            "contact_pct", "whiff_pct", "xwoba", "hr_per_pa", "rationale"]
     render_table(df.sort_values("consistency_score", ascending=False).head(40),
                  cols, "Consistency", "consistent")
 
