@@ -70,6 +70,9 @@ GLOSSARY = {
     "Hard-Hit%": "Share of batted balls ≥95 mph exit velocity.",
     "Whiff%": "Swing-and-miss rate = swings that miss / total swings (real, from FanGraphs Contact%). High whiff = more boom-or-bust, lower contact floor.",
     "Contact%": "Contact rate = contact made / swings (real, from FanGraphs); the complement of Whiff%. High contact = better bat-to-ball skill / higher floor.",
+    "Chase%": "O-Swing% — share of pitches OUTSIDE the zone the hitter swings at (real, FanGraphs). Higher chase = more volatile / boom-or-bust.",
+    "Zone-Contact%": "Z-Contact% — contact rate on swings at pitches INSIDE the zone (real, FanGraphs). The cleanest repeatable-contact / floor signal.",
+    "Fly-Ball%": "FB% — share of batted balls hit in the air (real, FanGraphs). Fly balls are the raw material of home runs, so above-average FB% earns a direct HR-rate boost.",
     "Avg EV": "Average exit velocity (mph).",
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
@@ -196,6 +199,9 @@ DISPLAY_COLUMNS = {
     "hard_hit_pct": "Hard-Hit%",
     "whiff_pct": "Whiff%",
     "contact_pct": "Contact%",
+    "chase_pct": "Chase%",
+    "zone_contact_pct": "Zone-Contact%",
+    "fb_pct": "Fly-Ball%",
     "avg_ev": "Avg EV",
     "max_ev": "Max EV",
     "xwoba": "xwOBA",
@@ -237,6 +243,9 @@ COLUMN_CONFIG = {
     "Hard-Hit%": st.column_config.NumberColumn("Hard-Hit%", help=GLOSSARY["Hard-Hit%"], format="%.1f"),
     "Whiff%": st.column_config.NumberColumn("Whiff%", help=GLOSSARY["Whiff%"], format="%.1f"),
     "Contact%": st.column_config.NumberColumn("Contact%", help=GLOSSARY["Contact%"], format="%.1f"),
+    "Chase%": st.column_config.NumberColumn("Chase%", help=GLOSSARY["Chase%"], format="%.1f"),
+    "Zone-Contact%": st.column_config.NumberColumn("Zone-Contact%", help=GLOSSARY["Zone-Contact%"], format="%.1f"),
+    "Fly-Ball%": st.column_config.NumberColumn("Fly-Ball%", help=GLOSSARY["Fly-Ball%"], format="%.1f"),
     "Avg EV": st.column_config.NumberColumn("Avg EV", help=GLOSSARY["Avg EV"], format="%.1f"),
     "Max EV": st.column_config.NumberColumn("Max EV", help=GLOSSARY["Max EV"], format="%.1f"),
     "xwOBA": st.column_config.NumberColumn("xwOBA", help=GLOSSARY["xwOBA"], format="%.3f"),
@@ -322,8 +331,8 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
-            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "whiff_pct",
-            "park_factor", "wind_mult", "rationale"]
+            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "fb_pct",
+            "whiff_pct", "chase_pct", "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
 
@@ -339,7 +348,7 @@ def tab_consistent(df: pd.DataFrame):
     metric_bar_chart(df, "consistency_score", "Consistency Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "consistency_score",
             "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "avg_ev",
-            "contact_pct", "whiff_pct", "xwoba", "hr_per_pa", "rationale"]
+            "contact_pct", "zone_contact_pct", "xwoba", "hr_per_pa", "rationale"]
     render_table(df.sort_values("consistency_score", ascending=False).head(40),
                  cols, "Consistency", "consistent")
 

@@ -129,7 +129,9 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
         # derive real swing-and-miss (whiff) rate; whiff% = 100 - Contact%.
         for src, dst in [("PA", "pa"), ("HR", "season_hr"), ("K%", "k_pct"),
                          ("xwOBA", "xwoba"), ("SO", "so"),
-                         ("Contact%", "contact_pct"), ("SwStr%", "swstr_pct")]:
+                         ("Contact%", "contact_pct"), ("SwStr%", "swstr_pct"),
+                         ("O-Swing%", "chase_pct"), ("Z-Contact%", "zone_contact_pct"),
+                         ("FB%", "fb_pct")]:
             if src in fg.columns:
                 cols[src] = dst
         fg_small = fg[["name_key"] + list(cols)].rename(columns=cols)
@@ -160,6 +162,13 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     # Contact% is the complement of whiff (contact made / swings); keep them
     # perfectly consistent and on a 0-100 percent scale.
     table["contact_pct"] = 100.0 - table["whiff_pct"]
+
+    # Plate-discipline + batted-ball rates (real, FanGraphs), normalized to 0-100%.
+    for col in ("chase_pct", "zone_contact_pct", "fb_pct"):
+        if col in table:
+            table[col] = table[col].map(_coerce_pct)
+        else:
+            table[col] = np.nan
 
     table["hr_per_pa"] = (table["season_hr"] / table["pa"]).replace([np.inf, -np.inf], np.nan)
     table["power_tier"] = table["barrel_pct"].map(_tier_from_barrel)
@@ -262,6 +271,8 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "avg_ev": g("avg_ev"), "max_ev": g("max_ev"),
         "launch_angle": g("launch_angle"), "xwoba": g("xwoba"),
         "k_pct": g("k_pct"), "whiff_pct": g("whiff_pct"), "contact_pct": g("contact_pct"),
+        "chase_pct": g("chase_pct"), "zone_contact_pct": g("zone_contact_pct"),
+        "fb_pct": g("fb_pct"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }

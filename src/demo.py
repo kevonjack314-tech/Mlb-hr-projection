@@ -360,6 +360,12 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     # swing-and-miss more; it tracks K% but is a distinct, swing-level signal.
     whiff_pct = {1: 18.0, 2: 21.0, 3: 24.0, 4: 27.0, 5: 30.0}[tier] + rng.uniform(-3.5, 3.5)
     whiff_pct = max(10.0, min(40.0, whiff_pct + (k_pct - {1: 18, 2: 21, 3: 23, 4: 25, 5: 26}[tier]) * 0.5))
+    # Plate discipline: chase (O-Swing%) tracks whiff; zone-contact (Z-Contact%)
+    # is the inverse. Fly-ball% rises with power/launch and is a real HR driver.
+    chase_pct = max(16.0, min(40.0, 22.0 + (whiff_pct - 24.0) * 0.6 + rng.uniform(-3.0, 3.0)))
+    zone_contact_pct = max(72.0, min(96.0, 100.0 - whiff_pct * 0.55 + rng.uniform(-3.0, 3.0)))
+    fb_pct = {1: 30.0, 2: 33.0, 3: 36.0, 4: 39.0, 5: 42.0}[tier] + (la - 13.0) * 0.6 + rng.uniform(-4.0, 4.0)
+    fb_pct = max(20.0, min(50.0, fb_pct))
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -385,6 +391,9 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "k_pct": round(max(10.0, k_pct), 1),
         "whiff_pct": round(whiff_pct, 1),
         "contact_pct": round(100.0 - whiff_pct, 1),
+        "chase_pct": round(chase_pct, 1),
+        "zone_contact_pct": round(zone_contact_pct, 1),
+        "fb_pct": round(fb_pct, 1),
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),

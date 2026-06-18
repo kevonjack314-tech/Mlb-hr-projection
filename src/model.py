@@ -45,7 +45,14 @@ REF = {
     "recent_hr_rate": (0.010, 0.080),
     "k_pct": (15.0, 32.0),
     "whiff_pct": (15.0, 35.0),
+    "chase_pct": (20.0, 38.0),
+    "zone_contact_pct": (78.0, 93.0),
+    "fb_pct": (25.0, 48.0),
 }
+
+# League-average fly-ball rate (FanGraphs batted-ball FB%); fly balls are the
+# raw material of home runs, so above-average FB% earns a real HR-rate boost.
+LEAGUE_FB_PCT = 35.0
 
 # --- Composite HR Score weights (must sum to 1.0). ---
 HR_SCORE_WEIGHTS = {
@@ -192,6 +199,15 @@ def score_row(row: pd.Series) -> dict:
     # Combined swing-and-miss signal (whiff weighted over K%).
     swing_miss_score = 0.6 * whiff_score + 0.4 * k_score
 
+    # Plate discipline + batted-ball profile.
+    chase_score = scale(row.get("chase_pct"), *REF["chase_pct"])          # high = chases more
+    zone_contact_score = scale(row.get("zone_contact_pct"), *REF["zone_contact_pct"])  # high = better floor
+    fb_pct = row.get("fb_pct")
+    fb_score = scale(fb_pct, *REF["fb_pct"])
+    # Fly-ball multiplier on HR rate: balls hit in the air vs on the ground.
+    fb_mult = (float(np.clip(1.0 + (fb_pct - LEAGUE_FB_PCT) / LEAGUE_FB_PCT * 0.5, 0.85, 1.18))
+               if fb_pct is not None else 1.0)
+
     matchup_mult, matchup_score = matchup_multiplier(row)
     env = environment_components(row)
 
@@ -205,6 +221,10 @@ def score_row(row: pd.Series) -> dict:
     out["max_ev_score"] = round(pq["_pq_subs"]["max_ev"], 1)
     out["hard_hit_score"] = round(pq["_pq_subs"]["hard_hit_pct"], 1)
     out["whiff_score"] = round(whiff_score, 1)
+    out["chase_score"] = round(chase_score, 1)
+    out["zone_contact_score"] = round(zone_contact_score, 1)
+    out["fb_score"] = round(fb_score, 1)
+    out["fb_mult"] = round(fb_mult, 3)
 
     # --- Composite HR Score (0-100) ---
     hr_score = (
@@ -228,7 +248,7 @@ def score_row(row: pd.Series) -> dict:
         + 0.25 * recent_capped
         + 0.20 * quality_implied
     )
-    p_adj = float(np.clip(base_rate * matchup_mult * env["env_mult"], 0.002, 0.085))
+    p_adj = float(np.clip(base_rate * matchup_mult * env["env_mult"] * fb_mult, 0.002, 0.090))
     pa = DEFAULT_PA
     p_game = 1.0 - (1.0 - p_adj) ** pa
     out["hr_prob_pa"] = round(p_adj, 4)
@@ -238,21 +258,25 @@ def score_row(row: pd.Series) -> dict:
     out["fair_odds"] = _prob_to_american(p_game)
 
     # --- Longshot Score (boom-or-bust ceiling) ---
+    # Fly-ball rate is part of the ceiling: balls in the air can leave the yard.
     longshot = (
-        0.45 * out["max_ev_score"]
-        + 0.25 * out["barrel_score"]
-        + 0.20 * env["env_score"]
+        0.40 * out["max_ev_score"]
+        + 0.22 * out["barrel_score"]
+        + 0.15 * fb_score
+        + 0.13 * env["env_score"]
         + 0.10 * matchup_score
     )
-    # Reward variance (more swing-and-miss = more boom-or-bust) and slightly
-    # de-emphasize players who are already chalk (high prob is not a "longshot").
-    variance_bonus = 1.0 + (swing_miss_score - 50.0) / 500.0   # ±0.10
+    # Reward variance (more swing-and-miss & more chasing = more boom-or-bust) and
+    # slightly de-emphasize players who are already chalk (not a "longshot").
+    variance_signal = 0.7 * swing_miss_score + 0.3 * chase_score
+    variance_bonus = 1.0 + (variance_signal - 50.0) / 500.0   # ±0.10
     chalk_penalty = 1.0 - max(0.0, (out["hr_prob_game"] - 0.12)) * 0.5
     out["longshot_score"] = round(float(np.clip(longshot * variance_bonus * chalk_penalty, 0, 100)), 1)
 
     # --- Consistency Score (high floor) ---
-    # Floor rewards bat-to-ball skill: low swing-and-miss (whiff) and low K%.
-    contact_floor = 100.0 - swing_miss_score
+    # Floor rewards bat-to-ball skill: low swing-and-miss and strong in-zone
+    # contact (Z-Contact%) — the cleanest repeatable-contact signal.
+    contact_floor = 0.6 * (100.0 - swing_miss_score) + 0.4 * zone_contact_score
     confidence = float(np.clip(row.get("pa", 200) / 450.0, 0.6, 1.0))  # sample-size trust
     consistency = (
         0.28 * out["hard_hit_score"]
@@ -297,6 +321,8 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
         bits.append(f"solid barrel rate ({row.get('barrel_pct')}%)")
     if out["max_ev_score"] >= 70:
         bits.append(f"big raw power ({row.get('max_ev')} mph max EV)")
+    if row.get("fb_pct") is not None and out.get("fb_score", 0) >= 65:
+        bits.append(f"fly-ball hitter ({row.get('fb_pct')}% FB)")
     if out["recent_form_score"] >= 65:
         bits.append("hot recent form")
     if out["park_factor"] >= 106:
