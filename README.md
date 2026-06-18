@@ -1,0 +1,249 @@
+# ⚾ MLB Home Run Projection Tool
+
+A detailed, transparent dashboard that ranks hitters by **home-run upside** for any
+MLB date. It blends Statcast-style batted-ball quality, recent form, the opposing
+pitcher matchup, ballpark factors, and live weather into a composite **HR Score**,
+a per-game **HR probability**, and three specialized rankings — **Longshots**,
+**Consistent HR Hitters**, and **Sneaky HR Chances**.
+
+> **For research & entertainment only.** HR probabilities are model estimates, not
+> guarantees or betting advice.
+
+---
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Then open the local URL Streamlit prints (default `http://localhost:8501`).
+
+- **Date picker** in the sidebar — defaults to today, works for any date.
+- **"Try live data"** toggle — pulls the real schedule, probable pitchers, rosters
+  and weather. If the network is unavailable, it falls back to a deterministic
+  **synthetic demo slate** so the app always works.
+
+---
+
+## What the app shows
+
+### Tabs / pages
+1. **🚀 Best Longshots** — high-upside, boom-or-bust bats ranked by an
+   *explosiveness* score (max EV + barrel% + favorable park/weather). Good for
+   +EV HR props and DFS tournaments. Includes vig-free fair odds.
+2. **🎯 Consistent HR Hitters** — reliable, high-floor power: steady hard
+   contact, low strikeouts, season HR pace, EV & xwOBA, weighted by sample size.
+3. **🕵️ Sneaky HR Chances** — under-the-radar value: favorable matchup vs a
+   hittable arm, hidden park/weather edge, or a hot streak not yet reflected in
+   the season line. Each player shows *why* they're sneaky.
+4. **📊 All Combined + Best Metrics** — the master table for the full slate with
+   every column, sortable/filterable, plus a Top-20 overall leaderboard.
+5. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
+   (configurable lookback): the *shared profile* of who went deep (how HR hitters
+   out-index the field on barrel%, EV, max EV, park, platoon), **model calibration**
+   (actual vs. predicted HR rate by decile), the hottest HR parks, a **Profile
+   Match %** for today's bats (resemblance to recent HR hitters), and the
+   **Top-5 list in each category**.
+
+### Features
+- **Leaderboard cards** with key metrics and a one-line rationale per player.
+- **Bar charts** of the top bats by each score.
+- **Sort & filter** by team, position, handedness, platoon advantage, and minimum
+  plate appearances.
+- **CSV export** on every view.
+- **Tooltips & a metric glossary** in the sidebar; **methodology** with the live
+  weight tables (pulled straight from the code so docs never drift).
+
+---
+
+## Data sources
+
+| Layer | Live source | Offline fallback |
+|------|-------------|------------------|
+| Schedule, probable pitchers, rosters/lineups | **MLB StatsAPI** (`statsapi.mlb.com`, no key) | Synthetic slate (`src/demo.py`) |
+| Weather (temp, wind speed/direction, humidity) | **Open-Meteo** forecast at park lat/lon (no key) | Synthetic / neutral |
+| Park factors & dimensions | Bundled `data/park_factors.csv` (Statcast/ESPN-calibrated) | same (bundled) |
+| Hitter Statcast (barrel%, EV, max EV, LA) | **Baseball Savant** exit-velo & barrels leaderboard via `pybaseball` | Deterministic modeled profiles |
+| Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
+| Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
+
+Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
+hitter starts from a modeled profile, then real season metrics and real recent-form
+HR rates overlay wherever they resolve (matched by MLBAM id, then by normalized
+name). So the slate is **real where live data exists and modeled only to fill
+gaps** — and the **Data** column / provenance panel tells you exactly which rows
+are `real` vs `modeled`, plus the overall coverage %.
+
+The live path is fully **defensive**: any failed fetch downgrades just that piece
+(or the whole slate) to the synthetic path and records a note in the **Data
+provenance** panel, so you always know exactly where each number came from.
+
+### ⚠️ Enabling live data (network egress allowlist)
+
+`pip install -r requirements.txt` installs `pybaseball`, which is all that's
+needed for live data **on an open network**. In a sandboxed environment (e.g.
+Claude Code on the web) outbound access is governed by an **egress allowlist**;
+until these hosts are added, every fetch returns `host_not_allowed` and the app
+runs on the synthetic demo slate:
+
+```
+statsapi.mlb.com          # schedule, probable pitchers, rosters/lineups
+baseballsavant.mlb.com    # Statcast batted-ball metrics + recent-form events
+www.fangraphs.com         # season PA / HR / K% / xwOBA
+api.open-meteo.com        # weather (temp, wind, humidity)
+```
+
+Add them in your environment's **network egress settings** (see
+<https://code.claude.com/docs/en/claude-code-on-the-web>). With the hosts allowed
+and `pybaseball` installed, flip the sidebar **"Try live data"** toggle on and the
+source badge changes to **🟢 LIVE (real Statcast)**.
+
+---
+
+## Methodology (show your work)
+
+Every raw input is normalized to a **0–100 sub-score** against *fixed league
+reference ranges* (≈5th–95th percentile of qualified hitters), so scores are
+comparable **across dates**, not just within one slate. The reference ranges live
+in `src/model.py::REF`.
+
+### 1. Composite **HR Score** (0–100)
+
+A weighted blend of five sub-scores (`HR_SCORE_WEIGHTS`):
+
+| Component | Weight | What it captures |
+|-----------|:------:|------------------|
+| Power quality (Statcast) | **0.34** | Barrel%, Hard-Hit%, xwOBA, Max EV, Avg EV |
+| Season HR rate | **0.16** | Season-long HR / PA |
+| Recent form | **0.16** | Last 7 / 15 / 30-day HR rate |
+| Matchup | **0.16** | Opposing pitcher + platoon edge |
+| Environment | **0.18** | Park factor + weather |
+
+The **power-quality** sub-score is itself a weighted blend
+(`POWER_QUALITY_WEIGHTS`): Barrel% **0.35**, Hard-Hit% **0.20**, xwOBA **0.20**,
+Max EV **0.15**, Avg EV **0.10**. Barrel rate gets the most weight because it is
+the single best public predictor of home-run output.
+
+**Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.50**,
+15-day **0.30**, 30-day **0.20** — the hottest, most recent signal counts most.
+
+### 2. **HR probability** (≥1 HR in the game)
+
+We build an adjusted per-PA HR rate, then compound it over expected plate
+appearances:
+
+```
+quality_implied = LEAGUE_HR_PER_PA × (0.5 + power_quality/100)      # 0.5×–1.5× league
+base_rate       = 0.55·(season HR/PA) + 0.25·(recent HR/PA, capped) + 0.20·quality_implied
+p_adj           = clip(base_rate × matchup_mult × env_mult, 0.002, 0.085)
+P(≥1 HR)        = 1 − (1 − p_adj)^PA          # PA ≈ 4.1
+xHR             = p_adj × PA
+fair_odds       = vig-free American odds from P(≥1 HR)
+```
+
+`LEAGUE_HR_PER_PA = 0.034`. The recent rate is capped so a small-sample heater
+can't blow up the estimate; `p_adj` is capped at 0.085/PA, which puts the very
+best spots around a realistic **~30%** chance of a homer in the game and the
+league-average bat near ~10–13%.
+
+### 3. **Matchup multiplier**
+
+From the probable pitcher: HR/9 allowed, barrel% allowed, ground-ball/fly-ball
+lean (FB arms give up more HR), and the hitter's **platoon edge**. Switch hitters
+are evaluated from the side they'll bat against that pitcher; a homer-prone fly-ball
+pitcher faced with a platoon advantage is the juiciest matchup.
+
+### 4. **Environment** — park + weather
+
+`env_mult = park × wind × temperature × humidity`, each centered at 1.0:
+
+- **Park factor** — handedness-aware (e.g. Yankee Stadium's short right porch
+  inflates LHB HR; Fenway suppresses RHB HR). Bundled, Statcast/ESPN-calibrated.
+- **Wind** — the wind vector is resolved against each park's home-plate→center-field
+  bearing (`orientation_deg`). A wind blowing **out** adds carry (~1.5%/mph of the
+  out component, with a small pull-side cross-wind credit); **in** knocks balls
+  down. Roofed/closed games are neutral.
+- **Temperature** — warmer, thinner air carries: ~1% per ~3.5 °F around a 70 °F
+  baseline.
+- **Humidity** — a small second-order carry effect (humid air is slightly less
+  dense).
+
+### 5. Trailing-month backtest & profile matching
+
+The **HR Trends & Backtest** tab gathers every HR in a date window (default ~30
+days ending on the selected date) with each hitter's profile and game context,
+then:
+
+- **Shared-profile analysis** — averages the HR hitters' metrics and reports the
+  **lift vs. the slate baseline** (e.g. HR hitters carry higher barrel% and season
+  HR/PA and skew toward platoon advantage).
+- **Calibration / validation** — bins hitter-games by predicted game HR probability
+  and plots **actual vs. predicted** HR rate per decile; a good model tracks the
+  diagonal. (With live Statcast this is genuine out-of-sample validation; in the
+  offline simulation, outcomes are drawn from the model's own probabilities, so it
+  illustrates the pipeline rather than proving accuracy.)
+- **Profile Match %** — a Gaussian-kernel similarity between each current hitter and
+  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, avg/max EV,
+  launch angle, and park factor. A blended **Calibrated** score = `0.85·HR Score +
+  0.15·Profile Match` and a **Top-5 list per category** are produced from it.
+
+Data path: LIVE pulls actual HR events from Baseball Savant
+(`pybaseball.statcast`); OFFLINE simulates outcomes deterministically from the
+modeled slates so the whole analysis runs without network.
+
+### 6. Specialized scores
+
+- **Longshot** = `0.45·MaxEV + 0.25·Barrel + 0.20·Env + 0.10·Matchup`, then
+  nudged by a **variance bonus** (higher K% = more boom-or-bust) and a **chalk
+  penalty** (already-high-probability bats aren't true "longshots").
+- **Consistency** = `0.28·HardHit + 0.22·Contact(low-K) + 0.20·SeasonHR +
+  0.15·AvgEV + 0.15·xwOBA`, scaled by a sample-size confidence factor.
+- **Sneaky** = `0.30·Matchup + 0.25·Env + 0.25·FormGap + 0.20·UnderRadar`, where
+  *FormGap* rewards bats heating up beyond their season line and *UnderRadar*
+  favors lower-profile hitters who still have real batted-ball pop.
+
+---
+
+## Assumptions & limitations
+
+- **Expected PA** is a flat ~4.1 for every starter (lineup-spot adjustments are a
+  natural next step).
+- When a posted lineup isn't available yet, the tool uses the team's **active
+  roster** (up to 13 position players), so some listed bats may not start.
+- The bundled **player pool** in `demo.py` is illustrative current-era hitters for
+  the offline demo; it is not guaranteed to match today's exact active rosters.
+- **Park factors** are static seasonal estimates; refresh `data/park_factors.csv`
+  annually.
+- The recent-form pull (Statcast date-range) is heavy on first call; it is cached
+  in-process and on disk (`pybaseball` cache) and refreshed via the sidebar button.
+- Pitcher matchup peripherals (HR/9, FB%, barrels allowed) are currently modeled;
+  the hitter Statcast, season stats, and recent-form HR rates are **live** when the
+  hosts above are allowlisted.
+
+---
+
+## Project layout
+
+```
+.
+├── app.py                  # Streamlit UI: tabs, filters, charts, CSV export
+├── requirements.txt
+├── data/
+│   └── park_factors.csv    # 30-park HR factors, dimensions, lat/lon, roof
+├── src/
+│   ├── parks.py            # park / wind / temp / humidity multipliers
+│   ├── model.py            # composite scoring + probability (weights as constants)
+│   ├── demo.py             # deterministic synthetic slate (offline fallback)
+│   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
+│   ├── history.py          # trailing-month HR backtest, profile match, top-5
+│   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
+└── .streamlit/config.toml  # dark theme
+```
+
+## Disclaimer
+
+This tool is for educational and entertainment purposes. Projections are
+probabilistic estimates derived from public data and modeling assumptions; they
+are **not** financial or betting advice.

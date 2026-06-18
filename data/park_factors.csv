@@ -1,0 +1,33 @@
+team_abbr,team_name,park_name,lat,lon,hr_factor,hr_factor_lhb,hr_factor_rhb,altitude_ft,roof,lf_ft,cf_ft,rf_ft,orientation_deg
+ARI,Arizona Diamondbacks,Chase Field,33.4453,-112.0667,103,104,102,1059,retractable,330,407,335,21
+ATL,Atlanta Braves,Truist Park,33.8907,-84.4677,102,101,103,1050,open,335,400,325,46
+BAL,Baltimore Orioles,Oriole Park at Camden Yards,39.2839,-76.6217,97,99,95,20,open,333,410,318,30
+BOS,Boston Red Sox,Fenway Park,42.3467,-71.0972,96,108,90,21,open,310,390,302,45
+CHC,Chicago Cubs,Wrigley Field,41.9484,-87.6553,101,100,102,600,open,355,400,353,31
+CWS,Chicago White Sox,Guaranteed Rate Field,41.83,-87.6339,106,105,107,594,open,330,400,335,128
+CIN,Cincinnati Reds,Great American Ball Park,39.0975,-84.5069,113,116,110,489,open,328,404,325,120
+CLE,Cleveland Guardians,Progressive Field,41.4962,-81.6852,98,97,99,660,open,325,405,325,0
+COL,Colorado Rockies,Coors Field,39.7559,-104.9942,114,112,116,5211,open,347,415,350,45
+DET,Detroit Tigers,Comerica Park,42.339,-83.0485,94,95,93,600,open,345,412,330,150
+HOU,Houston Astros,Minute Maid Park,29.7572,-95.3556,108,103,112,50,retractable,315,409,326,348
+KC,Kansas City Royals,Kauffman Stadium,39.0517,-94.4803,92,93,91,750,open,330,410,330,45
+LAA,Los Angeles Angels,Angel Stadium,33.8003,-117.8827,98,99,97,160,open,330,396,330,45
+LAD,Los Angeles Dodgers,Dodger Stadium,34.0739,-118.24,103,105,101,510,open,330,395,330,25
+MIA,Miami Marlins,loanDepot park,25.7781,-80.2197,93,92,94,10,retractable,344,400,335,40
+MIL,Milwaukee Brewers,American Family Field,43.028,-87.9712,104,103,105,635,retractable,344,400,345,127
+MIN,Minnesota Twins,Target Field,44.9817,-93.2776,100,101,99,830,open,339,404,328,90
+NYM,New York Mets,Citi Field,40.7571,-73.8458,97,96,98,20,open,335,408,330,28
+NYY,New York Yankees,Yankee Stadium,40.8296,-73.9262,110,121,101,55,open,318,408,314,75
+OAK,Oakland Athletics,Oakland Coliseum,37.7516,-122.2005,90,89,91,42,open,330,400,330,60
+ATH,Athletics,Sutter Health Park,38.5802,-121.5135,105,104,106,25,open,330,403,325,90
+PHI,Philadelphia Phillies,Citizens Bank Park,39.9061,-75.1665,107,106,108,20,open,329,401,330,3
+PIT,Pittsburgh Pirates,PNC Park,40.4469,-80.0057,93,96,90,730,open,325,399,320,115
+SD,San Diego Padres,Petco Park,32.7073,-117.1566,95,94,96,62,open,336,396,322,0
+SF,San Francisco Giants,Oracle Park,37.7786,-122.3893,90,87,93,12,open,339,399,309,90
+SEA,Seattle Mariners,T-Mobile Park,47.5914,-122.3326,93,92,94,10,retractable,331,401,326,123
+STL,St. Louis Cardinals,Busch Stadium,38.6226,-90.1928,96,97,95,465,open,336,400,335,60
+TB,Tampa Bay Rays,Tropicana Field,27.7682,-82.6534,96,95,97,15,dome,315,404,322,45
+TBR,Tampa Bay Rays,George M. Steinbrenner Field,27.9797,-82.5065,103,104,102,40,open,318,408,314,75
+TEX,Texas Rangers,Globe Life Field,32.7472,-97.0825,101,100,102,545,retractable,329,407,326,0
+TOR,Toronto Blue Jays,Rogers Centre,43.6414,-79.3894,102,101,103,250,retractable,328,400,328,348
+WSH,Washington Nationals,Nationals Park,38.873,-77.0074,101,102,100,25,open,336,402,335,30
