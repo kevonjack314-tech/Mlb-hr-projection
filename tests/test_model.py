@@ -63,3 +63,28 @@ def test_park_and_wind_multipliers():
 def test_rationale_present():
     df = _slate()
     assert df["rationale"].astype(str).str.len().gt(0).all()
+
+
+def test_hr_history_and_profile():
+    from src.history import (build_hr_history, summarize_hr_profile,
+                             hr_profile_centroid, add_profile_similarity,
+                             calibration_table, top5_by_category)
+    events, slate, source, _ = build_hr_history("2026-06-01", "2026-06-10", prefer_live=False)
+    assert source == "SIMULATED"
+    assert not events.empty and "barrel_pct" in events.columns
+    summ = summarize_hr_profile(events, slate)
+    assert summ["hr_events"] > 0 and not summ["metric_table"].empty
+    # HR hitters should out-index the field on barrel rate.
+    bt = summ["metric_table"].set_index("Metric")
+    assert bt.loc["Barrel%", "HR hitters (avg)"] >= bt.loc["Barrel%", "All hitters (avg)"]
+    # Calibration should be monotone-ish: top decile beats bottom decile.
+    cal = calibration_table(slate)
+    assert cal.iloc[-1]["Actual HR%"] > cal.iloc[0]["Actual HR%"]
+
+    centroid = hr_profile_centroid(events)
+    cur = add_profile_similarity(_slate(), centroid)
+    assert cur["profile_match"].between(0, 100).all()
+    tops = top5_by_category(cur, n=5)
+    assert set(tops) == {"Overall (HR Score)", "Best Longshots",
+                         "Consistent HR Hitters", "Sneaky HR Chances"}
+    assert all(len(t) == 5 for t in tops.values())

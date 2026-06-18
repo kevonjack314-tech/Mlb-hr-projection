@@ -11,6 +11,14 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from src.history import (
+    add_profile_similarity,
+    build_hr_history,
+    calibration_table,
+    hr_profile_centroid,
+    summarize_hr_profile,
+    top5_by_category,
+)
 from src.model import (
     HR_SCORE_WEIGHTS,
     POWER_QUALITY_WEIGHTS,
@@ -38,6 +46,15 @@ def load_scored_slate(date_iso: str, prefer_live: bool):
     return scored, source, notes
 
 
+@st.cache_data(show_spinner="Analyzing trailing-month HR history…", ttl=60 * 60)
+def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool):
+    events, slate_hist, source, notes = build_hr_history(start_iso, end_iso, prefer_live)
+    summary = summarize_hr_profile(events, slate_hist)
+    centroid = hr_profile_centroid(events)
+    calib = calibration_table(slate_hist)
+    return events, summary, centroid, calib, source, notes
+
+
 # --------------------------------------------------------------------------- #
 # Tooltip / metric glossary
 # --------------------------------------------------------------------------- #
@@ -55,6 +72,8 @@ GLOSSARY = {
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
     "Park Factor": "Handedness-aware HR park factor (100 = average; 110 = +10% HR).",
+    "Profile Match": "How closely a hitter resembles the trailing-month HR-hitter profile (barrel%, EV, max EV, launch angle, park) — 100 = a dead-ringer for recent HR hitters.",
+    "Calibrated": "HR Score nudged by recent-HR Profile Match (85% HR Score + 15% Profile Match).",
 }
 
 
@@ -73,11 +92,16 @@ def sidebar_controls():
         "Try live data (MLB StatsAPI + weather)", value=True,
         help="If off (or if the network is unavailable), a deterministic synthetic slate is used.",
     )
+    lookback = st.sidebar.slider(
+        "Backtest lookback (days)", min_value=7, max_value=45, value=31, step=1,
+        help="Window of past HRs analyzed for the Trends tab (default ~1 month).",
+    )
     if st.sidebar.button("🔄 Refresh data", use_container_width=True):
         load_scored_slate.clear()
+        load_hr_history.clear()
         st.rerun()
 
-    return game_date, prefer_live
+    return game_date, prefer_live, lookback
 
 
 def methodology_sidebar():
@@ -158,6 +182,8 @@ DISPLAY_COLUMNS = {
     "bats": "Bats",
     "position": "Pos",
     "hr_score": "HR Score",
+    "calibrated_score": "Calibrated",
+    "profile_match": "Profile Match",
     "hr_prob_game": "HR Prob (game)",
     "xhr": "xHR",
     "fair_odds": "Fair Odds",
@@ -182,6 +208,12 @@ DISPLAY_COLUMNS = {
 COLUMN_CONFIG = {
     "HR Score": st.column_config.ProgressColumn(
         "HR Score", help=GLOSSARY["HR Score"], min_value=0, max_value=100, format="%.1f"
+    ),
+    "Calibrated": st.column_config.ProgressColumn(
+        "Calibrated", help=GLOSSARY["Calibrated"], min_value=0, max_value=100, format="%.1f"
+    ),
+    "Profile Match": st.column_config.NumberColumn(
+        "Profile Match", help=GLOSSARY["Profile Match"], format="%.0f"
     ),
     "HR Prob (game)": st.column_config.NumberColumn(
         "HR Prob (game)", help=GLOSSARY["HR Prob (game)"], format="%.1f%%"
@@ -354,11 +386,117 @@ def tab_all(df: pd.DataFrame):
     render_table(disp_sorted, cols, DISPLAY_COLUMNS.get(sort_col, "HR Score"), "all_combined")
 
 
+def _top5_card_grid(tops: dict):
+    """Render the four category top-5 lists as compact tables."""
+    for label, t in tops.items():
+        st.markdown(f"#### {label}")
+        disp = t.copy()
+        if "hr_prob_game" in disp:
+            disp["hr_prob_game"] = (disp["hr_prob_game"] * 100).round(0)
+        rename = {
+            "player": "Player", "team": "Team", "opponent": "Opp",
+            "pitcher_name": "Pitcher", "hr_prob_game": "HR Prob %",
+            "profile_match": "Profile Match", "calibrated_score": "Calibrated",
+            "hr_score": "HR Score", "longshot_score": "Longshot",
+            "consistency_score": "Consistency", "sneaky_score": "Sneaky",
+            "barrel_pct": "Barrel%", "max_ev": "Max EV", "park_factor": "Park",
+        }
+        st.dataframe(disp.rename(columns=rename), hide_index=True,
+                     use_container_width=True)
+
+
+def tab_trends(history, projection_slate):
+    events, summary, centroid, calib, source, notes, start_iso, end_iso = history
+    st.subheader("📈 HR Trends & Backtest")
+    badge = "🟢" if source.startswith("LIVE") else "🟡"
+    st.caption(
+        f"{badge} **{source}** — every home run from **{start_iso} → {end_iso}**, the "
+        "shared profile of who went deep, model calibration, and how today's bats "
+        "resemble recent HR hitters."
+    )
+    with st.expander("Data provenance", expanded=False):
+        for n in notes:
+            st.markdown(f"- {n}")
+
+    if not summary:
+        st.warning("No HR history available for this window.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("HRs in window", summary.get("total_hr"))
+    c2.metric("HR games", summary.get("hr_events"))
+    c3.metric("Unique HR hitters", summary.get("unique_hitters"))
+    c4.metric("HR games / day", summary.get("hr_per_day"))
+
+    st.markdown("##### 🔬 Shared profile of HR hitters vs. all hitters")
+    st.caption("How much HR hitters out-index the slate baseline on each metric.")
+    st.dataframe(summary["metric_table"], hide_index=True, use_container_width=True)
+
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.markdown("**Context of home runs**")
+        st.markdown(
+            f"- Hit with a **platoon advantage:** {summary.get('platoon_share','—')}%\n"
+            f"- In **HR-friendly parks** (PF ≥ 105): {summary.get('hr_friendly_share','—')}%\n"
+            f"- Mean **HR Score** — HR hitters **{summary.get('mean_hr_score_hr_hitters','—')}** "
+            f"vs all **{summary.get('mean_hr_score_all','—')}**"
+        )
+        hand = summary.get("handedness", {})
+        if hand:
+            st.markdown("- **Handedness:** " + ", ".join(f"{k} {v:.0f}%" for k, v in hand.items()))
+    with cc2:
+        st.markdown("**Hottest HR parks (by HR count)**")
+        tp = summary.get("top_parks", {})
+        if tp:
+            tp_df = pd.DataFrame({"Park": list(tp), "HRs": list(tp.values())})
+            st.altair_chart(
+                alt.Chart(tp_df).mark_bar(color="#e63946").encode(
+                    x=alt.X("HRs:Q"), y=alt.Y("Park:N", sort="-x", title=None),
+                    tooltip=["Park", "HRs"]),
+                use_container_width=True,
+            )
+
+    if calib is not None and not calib.empty:
+        st.markdown("##### 🎯 Model calibration — predicted vs. actual HR rate")
+        st.caption(
+            "Each decile bins hitter-games by the model's predicted game HR probability; "
+            "a well-calibrated model tracks the diagonal (actual ≈ predicted)."
+        )
+        melt = calib.melt(id_vars="Decile", value_vars=["Predicted HR%", "Actual HR%"],
+                          var_name="Series", value_name="HR%")
+        line = alt.Chart(melt).mark_line(point=True).encode(
+            x=alt.X("Decile:N", sort=list(calib["Decile"])),
+            y=alt.Y("HR%:Q"),
+            color=alt.Color("Series:N", scale=alt.Scale(
+                domain=["Predicted HR%", "Actual HR%"], range=["#888", "#e63946"])),
+            tooltip=["Decile", "Series", "HR%"],
+        ).properties(height=260)
+        st.altair_chart(line, use_container_width=True)
+        st.dataframe(calib, hide_index=True, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown(f"### 🏆 Top 5 per category — projections for {end_iso}")
+    st.caption(
+        "Built from the model and informed by the trailing-month HR profile. "
+        "**Profile Match** = resemblance to recent HR hitters; **Calibrated** blends "
+        "it with the HR Score."
+    )
+    tops = top5_by_category(projection_slate, n=5)
+    _top5_card_grid(tops)
+
+    flat = pd.concat([t.assign(Category=label) for label, t in tops.items()], ignore_index=True)
+    st.download_button(
+        "⬇️ Export all top-5 lists to CSV",
+        flat.to_csv(index=False).encode(), file_name="top5_by_category.csv",
+        mime="text/csv",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def main():
-    game_date, prefer_live = sidebar_controls()
+    game_date, prefer_live, lookback = sidebar_controls()
     methodology_sidebar()
 
     st.title("⚾ MLB Home Run Projection Tool")
@@ -383,6 +521,16 @@ def main():
         st.warning("No games/hitters available for this date.")
         return
 
+    # Trailing-month HR history -> profile centroid -> enrich slate with the
+    # "resemblance to recent HR hitters" signal used by the Trends tab.
+    start_iso = (game_date - dt.timedelta(days=lookback)).isoformat()
+    end_iso = game_date.isoformat()
+    events, summary, centroid, calib, h_source, h_notes = load_hr_history(
+        start_iso, end_iso, prefer_live
+    )
+    scored = add_profile_similarity(scored, centroid)
+    history = (events, summary, centroid, calib, h_source, h_notes, start_iso, end_iso)
+
     filtered = filter_controls(scored)
     if filtered.empty:
         st.warning("No hitters match the current filters.")
@@ -390,9 +538,10 @@ def main():
 
     st.markdown(f"**{len(filtered)}** hitters across **{filtered['game'].nunique()}** games after filters.")
 
-    t1, t2, t3, t4 = st.tabs(
+    t1, t2, t3, t4, t5 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
-         "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics"]
+         "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
+         "📈 HR Trends & Backtest"]
     )
     with t1:
         tab_longshots(filtered)
@@ -402,6 +551,8 @@ def main():
         tab_sneaky(filtered)
     with t4:
         tab_all(filtered)
+    with t5:
+        tab_trends(history, filtered)
 
 
 if __name__ == "__main__":

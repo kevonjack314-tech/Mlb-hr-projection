@@ -40,6 +40,12 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
    the season line. Each player shows *why* they're sneaky.
 4. **📊 All Combined + Best Metrics** — the master table for the full slate with
    every column, sortable/filterable, plus a Top-20 overall leaderboard.
+5. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
+   (configurable lookback): the *shared profile* of who went deep (how HR hitters
+   out-index the field on barrel%, EV, max EV, park, platoon), **model calibration**
+   (actual vs. predicted HR rate by decile), the hottest HR parks, a **Profile
+   Match %** for today's bats (resemblance to recent HR hitters), and the
+   **Top-5 list in each category**.
 
 ### Features
 - **Leaderboard cards** with key metrics and a one-line rationale per player.
@@ -164,7 +170,30 @@ pitcher faced with a platoon advantage is the juiciest matchup.
 - **Humidity** — a small second-order carry effect (humid air is slightly less
   dense).
 
-### 5. Specialized scores
+### 5. Trailing-month backtest & profile matching
+
+The **HR Trends & Backtest** tab gathers every HR in a date window (default ~30
+days ending on the selected date) with each hitter's profile and game context,
+then:
+
+- **Shared-profile analysis** — averages the HR hitters' metrics and reports the
+  **lift vs. the slate baseline** (e.g. HR hitters carry higher barrel% and season
+  HR/PA and skew toward platoon advantage).
+- **Calibration / validation** — bins hitter-games by predicted game HR probability
+  and plots **actual vs. predicted** HR rate per decile; a good model tracks the
+  diagonal. (With live Statcast this is genuine out-of-sample validation; in the
+  offline simulation, outcomes are drawn from the model's own probabilities, so it
+  illustrates the pipeline rather than proving accuracy.)
+- **Profile Match %** — a Gaussian-kernel similarity between each current hitter and
+  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, avg/max EV,
+  launch angle, and park factor. A blended **Calibrated** score = `0.85·HR Score +
+  0.15·Profile Match` and a **Top-5 list per category** are produced from it.
+
+Data path: LIVE pulls actual HR events from Baseball Savant
+(`pybaseball.statcast`); OFFLINE simulates outcomes deterministically from the
+modeled slates so the whole analysis runs without network.
+
+### 6. Specialized scores
 
 - **Longshot** = `0.45·MaxEV + 0.25·Barrel + 0.20·Env + 0.10·Matchup`, then
   nudged by a **variance bonus** (higher K% = more boom-or-bust) and a **chalk
@@ -208,6 +237,7 @@ pitcher faced with a platoon advantage is the juiciest matchup.
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
+│   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme
 ```
