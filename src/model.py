@@ -48,11 +48,18 @@ REF = {
     "chase_pct": (20.0, 38.0),
     "zone_contact_pct": (78.0, 93.0),
     "fb_pct": (25.0, 48.0),
+    "gb_pct": (35.0, 55.0),
+    "ld_pct": (15.0, 27.0),
+    "pull_pct": (32.0, 48.0),
+    "hr_fb": (6.0, 22.0),
 }
 
 # League-average fly-ball rate (FanGraphs batted-ball FB%); fly balls are the
 # raw material of home runs, so above-average FB% earns a real HR-rate boost.
 LEAGUE_FB_PCT = 35.0
+# League-average HR/FB (home runs per fly ball) — the fly-ball -> HR conversion
+# rate, a direct measure of game power applied to balls in the air.
+LEAGUE_HR_FB = 12.5
 
 # --- Composite HR Score weights (must sum to 1.0). ---
 HR_SCORE_WEIGHTS = {
@@ -207,6 +214,15 @@ def score_row(row: pd.Series) -> dict:
     # Fly-ball multiplier on HR rate: balls hit in the air vs on the ground.
     fb_mult = (float(np.clip(1.0 + (fb_pct - LEAGUE_FB_PCT) / LEAGUE_FB_PCT * 0.5, 0.85, 1.18))
                if fb_pct is not None else 1.0)
+    # Batted-ball distribution + pull + HR/FB conversion (real, FanGraphs).
+    gb_score = scale(row.get("gb_pct"), *REF["gb_pct"])      # high = grounders (bad for HR)
+    ld_score = scale(row.get("ld_pct"), *REF["ld_pct"])
+    pull_score = scale(row.get("pull_pct"), *REF["pull_pct"])  # pulled air balls leave the yard
+    hr_fb = row.get("hr_fb")
+    hr_fb_score = scale(hr_fb, *REF["hr_fb"])
+    # HR/FB multiplier on HR rate: how often this bat's fly balls clear the wall.
+    hr_fb_mult = (float(np.clip(1.0 + (hr_fb - LEAGUE_HR_FB) / LEAGUE_HR_FB * 0.35, 0.88, 1.15))
+                  if hr_fb is not None else 1.0)
 
     matchup_mult, matchup_score = matchup_multiplier(row)
     env = environment_components(row)
@@ -225,6 +241,11 @@ def score_row(row: pd.Series) -> dict:
     out["zone_contact_score"] = round(zone_contact_score, 1)
     out["fb_score"] = round(fb_score, 1)
     out["fb_mult"] = round(fb_mult, 3)
+    out["pull_score"] = round(pull_score, 1)
+    out["hr_fb_score"] = round(hr_fb_score, 1)
+    out["hr_fb_mult"] = round(hr_fb_mult, 3)
+    out["gb_score"] = round(gb_score, 1)
+    out["ld_score"] = round(ld_score, 1)
 
     # --- Composite HR Score (0-100) ---
     hr_score = (
@@ -248,7 +269,9 @@ def score_row(row: pd.Series) -> dict:
         + 0.25 * recent_capped
         + 0.20 * quality_implied
     )
-    p_adj = float(np.clip(base_rate * matchup_mult * env["env_mult"] * fb_mult, 0.002, 0.090))
+    p_adj = float(np.clip(
+        base_rate * matchup_mult * env["env_mult"] * fb_mult * hr_fb_mult,
+        0.002, 0.095))
     pa = DEFAULT_PA
     p_game = 1.0 - (1.0 - p_adj) ** pa
     out["hr_prob_pa"] = round(p_adj, 4)
@@ -258,13 +281,16 @@ def score_row(row: pd.Series) -> dict:
     out["fair_odds"] = _prob_to_american(p_game)
 
     # --- Longshot Score (boom-or-bust ceiling) ---
-    # Fly-ball rate is part of the ceiling: balls in the air can leave the yard.
+    # The ceiling rewards air-ball power: fly-ball rate, HR/FB conversion, and
+    # pull tendency (pulled fly balls clear the wall most often).
     longshot = (
-        0.40 * out["max_ev_score"]
-        + 0.22 * out["barrel_score"]
-        + 0.15 * fb_score
-        + 0.13 * env["env_score"]
-        + 0.10 * matchup_score
+        0.32 * out["max_ev_score"]
+        + 0.20 * out["barrel_score"]
+        + 0.13 * fb_score
+        + 0.10 * hr_fb_score
+        + 0.08 * pull_score
+        + 0.10 * env["env_score"]
+        + 0.07 * matchup_score
     )
     # Reward variance (more swing-and-miss & more chasing = more boom-or-bust) and
     # slightly de-emphasize players who are already chalk (not a "longshot").

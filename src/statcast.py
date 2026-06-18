@@ -131,7 +131,8 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
                          ("xwOBA", "xwoba"), ("SO", "so"),
                          ("Contact%", "contact_pct"), ("SwStr%", "swstr_pct"),
                          ("O-Swing%", "chase_pct"), ("Z-Contact%", "zone_contact_pct"),
-                         ("FB%", "fb_pct")]:
+                         ("FB%", "fb_pct"), ("GB%", "gb_pct"), ("LD%", "ld_pct"),
+                         ("Pull%", "pull_pct"), ("HR/FB", "hr_fb")]:
             if src in fg.columns:
                 cols[src] = dst
         fg_small = fg[["name_key"] + list(cols)].rename(columns=cols)
@@ -164,7 +165,8 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     table["contact_pct"] = 100.0 - table["whiff_pct"]
 
     # Plate-discipline + batted-ball rates (real, FanGraphs), normalized to 0-100%.
-    for col in ("chase_pct", "zone_contact_pct", "fb_pct"):
+    for col in ("chase_pct", "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
+                "pull_pct", "hr_fb"):
         if col in table:
             table[col] = table[col].map(_coerce_pct)
         else:
@@ -272,7 +274,8 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "launch_angle": g("launch_angle"), "xwoba": g("xwoba"),
         "k_pct": g("k_pct"), "whiff_pct": g("whiff_pct"), "contact_pct": g("contact_pct"),
         "chase_pct": g("chase_pct"), "zone_contact_pct": g("zone_contact_pct"),
-        "fb_pct": g("fb_pct"),
+        "fb_pct": g("fb_pct"), "gb_pct": g("gb_pct"), "ld_pct": g("ld_pct"),
+        "pull_pct": g("pull_pct"), "hr_fb": g("hr_fb"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }

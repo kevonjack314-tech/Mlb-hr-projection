@@ -366,6 +366,14 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     zone_contact_pct = max(72.0, min(96.0, 100.0 - whiff_pct * 0.55 + rng.uniform(-3.0, 3.0)))
     fb_pct = {1: 30.0, 2: 33.0, 3: 36.0, 4: 39.0, 5: 42.0}[tier] + (la - 13.0) * 0.6 + rng.uniform(-4.0, 4.0)
     fb_pct = max(20.0, min(50.0, fb_pct))
+    # Batted-ball distribution: GB% + LD% + FB% ≈ 100. Line drives ~21% league.
+    ld_pct = max(14.0, min(28.0, 21.0 + rng.uniform(-3.0, 3.0)))
+    gb_pct = max(28.0, min(58.0, 100.0 - fb_pct - ld_pct))
+    # Pull% (~40% league) rises with power; HR/FB is the fly-ball -> HR conversion
+    # rate (~12-13% league), strongly tied to raw power tier.
+    pull_pct = max(30.0, min(52.0, 38.0 + (tier - 3) * 2.0 + rng.uniform(-4.0, 4.0)))
+    hr_fb = {1: 6.0, 2: 9.0, 3: 12.0, 4: 16.0, 5: 20.0}[tier] + (barrel - {1: 4.5, 2: 7.0, 3: 9.5, 4: 13.0, 5: 17.0}[tier]) * 0.4 + rng.uniform(-2.0, 2.0)
+    hr_fb = max(3.0, min(28.0, hr_fb))
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -394,6 +402,10 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "chase_pct": round(chase_pct, 1),
         "zone_contact_pct": round(zone_contact_pct, 1),
         "fb_pct": round(fb_pct, 1),
+        "gb_pct": round(gb_pct, 1),
+        "ld_pct": round(ld_pct, 1),
+        "pull_pct": round(pull_pct, 1),
+        "hr_fb": round(hr_fb, 1),
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),

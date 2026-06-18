@@ -73,6 +73,10 @@ GLOSSARY = {
     "Chase%": "O-Swing% — share of pitches OUTSIDE the zone the hitter swings at (real, FanGraphs). Higher chase = more volatile / boom-or-bust.",
     "Zone-Contact%": "Z-Contact% — contact rate on swings at pitches INSIDE the zone (real, FanGraphs). The cleanest repeatable-contact / floor signal.",
     "Fly-Ball%": "FB% — share of batted balls hit in the air (real, FanGraphs). Fly balls are the raw material of home runs, so above-average FB% earns a direct HR-rate boost.",
+    "Ground-Ball%": "GB% — share of batted balls on the ground (real, FanGraphs). Grounders almost never leave the yard, so high GB% suppresses HR upside.",
+    "Line-Drive%": "LD% — share of batted balls hit as line drives (real, FanGraphs). Great for hits, but line drives are usually too low to clear the wall.",
+    "Pull%": "Share of batted balls hit to the pull side (real, FanGraphs). Pulled fly balls clear the wall most often, so pull power lifts the HR ceiling.",
+    "HR/FB": "Home runs per fly ball (real, FanGraphs) — the fly-ball→HR conversion rate; a direct measure of game power. Drives a dedicated HR-rate multiplier.",
     "Avg EV": "Average exit velocity (mph).",
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
@@ -202,6 +206,10 @@ DISPLAY_COLUMNS = {
     "chase_pct": "Chase%",
     "zone_contact_pct": "Zone-Contact%",
     "fb_pct": "Fly-Ball%",
+    "gb_pct": "Ground-Ball%",
+    "ld_pct": "Line-Drive%",
+    "pull_pct": "Pull%",
+    "hr_fb": "HR/FB",
     "avg_ev": "Avg EV",
     "max_ev": "Max EV",
     "xwoba": "xwOBA",
@@ -246,6 +254,10 @@ COLUMN_CONFIG = {
     "Chase%": st.column_config.NumberColumn("Chase%", help=GLOSSARY["Chase%"], format="%.1f"),
     "Zone-Contact%": st.column_config.NumberColumn("Zone-Contact%", help=GLOSSARY["Zone-Contact%"], format="%.1f"),
     "Fly-Ball%": st.column_config.NumberColumn("Fly-Ball%", help=GLOSSARY["Fly-Ball%"], format="%.1f"),
+    "Ground-Ball%": st.column_config.NumberColumn("Ground-Ball%", help=GLOSSARY["Ground-Ball%"], format="%.1f"),
+    "Line-Drive%": st.column_config.NumberColumn("Line-Drive%", help=GLOSSARY["Line-Drive%"], format="%.1f"),
+    "Pull%": st.column_config.NumberColumn("Pull%", help=GLOSSARY["Pull%"], format="%.1f"),
+    "HR/FB": st.column_config.NumberColumn("HR/FB", help=GLOSSARY["HR/FB"], format="%.1f"),
     "Avg EV": st.column_config.NumberColumn("Avg EV", help=GLOSSARY["Avg EV"], format="%.1f"),
     "Max EV": st.column_config.NumberColumn("Max EV", help=GLOSSARY["Max EV"], format="%.1f"),
     "xwOBA": st.column_config.NumberColumn("xwOBA", help=GLOSSARY["xwOBA"], format="%.3f"),
@@ -332,7 +344,8 @@ def tab_longshots(df: pd.DataFrame):
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
             "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "fb_pct",
-            "whiff_pct", "chase_pct", "park_factor", "wind_mult", "rationale"]
+            "hr_fb", "pull_pct", "whiff_pct", "chase_pct", "park_factor",
+            "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
 

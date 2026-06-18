@@ -41,8 +41,11 @@ from .model import score_slate
 from .parks import get_park, park_hr_multiplier
 
 # Metrics that define the "HR hitter profile" used for similarity matching.
+# GB% and LD% are intentionally left out of the centroid (collinear with FB%)
+# but still appear in the shared-profile lift table below.
 PROFILE_METRICS = ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
-                   "launch_angle", "whiff_pct", "fb_pct", "park_factor"]
+                   "launch_angle", "whiff_pct", "fb_pct", "pull_pct",
+                   "hr_fb", "park_factor"]
 
 # Savant team codes -> our park abbreviations (handles the handful that differ).
 _SAVANT_TEAM_FIX = {
@@ -142,7 +145,8 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 prof = {m: srow.get(m) for m in
                         ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
                          "launch_angle", "whiff_pct", "chase_pct",
-                         "zone_contact_pct", "fb_pct", "xwoba", "hr_per_pa"]}
+                         "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
+                         "pull_pct", "hr_fb", "xwoba", "hr_per_pa"]}
             rows.append({
                 "date": str(r.get("game_date")),
                 "player": r.get("player_name"),
@@ -187,8 +191,9 @@ def summarize_hr_profile(events: pd.DataFrame, slate: pd.DataFrame) -> dict:
         ("barrel_pct", "Barrel%"), ("hard_hit_pct", "Hard-Hit%"),
         ("avg_ev", "Avg EV"), ("max_ev", "Max EV"),
         ("launch_angle", "Launch Angle"), ("whiff_pct", "Whiff%"),
-        ("fb_pct", "Fly-Ball%"), ("hr_per_pa", "Season HR/PA"),
-        ("park_factor", "Park Factor"),
+        ("fb_pct", "Fly-Ball%"), ("gb_pct", "Ground-Ball%"),
+        ("ld_pct", "Line-Drive%"), ("pull_pct", "Pull%"), ("hr_fb", "HR/FB"),
+        ("hr_per_pa", "Season HR/PA"), ("park_factor", "Park Factor"),
     ]:
         if m not in events.columns:
             continue

@@ -69,6 +69,7 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
 | **Contact%** & swing-and-miss **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
 | **Chase%** (O-Swing%), **Zone-Contact%** (Z-Contact%), **Fly-Ball%** (FB%) | **FanGraphs** discipline + batted-ball via `pybaseball` | Modeled profiles |
+| **Ground-Ball%**, **Line-Drive%**, **Pull%**, **HR/FB** | **FanGraphs** batted-ball via `pybaseball` | Modeled profiles |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -202,10 +203,13 @@ modeled slates so the whole analysis runs without network.
 - **Fly-ball multiplier** on the HR probability: `1 + (FB% − 35)/35 · 0.5`, clipped
   to `[0.85, 1.18]`. Fly balls are the raw material of home runs, so an
   above-average **FB%** earns a direct HR-rate boost (and below-average a haircut).
-- **Longshot** = `0.40·MaxEV + 0.22·Barrel + 0.15·FlyBall + 0.13·Env + 0.10·Matchup`,
-  then nudged by a **variance bonus** = `f(0.7·swing-and-miss + 0.3·Chase%)`
-  (more whiff & more chasing = more boom-or-bust) and a **chalk penalty**
-  (already-high-probability bats aren't true "longshots").
+- **HR/FB multiplier** on the HR probability: `1 + (HR/FB − 12.5)/12.5 · 0.35`,
+  clipped to `[0.88, 1.15]`. HR-per-fly-ball is the fly-ball→HR conversion rate — a
+  direct read on game power applied to balls in the air.
+- **Longshot** = `0.32·MaxEV + 0.20·Barrel + 0.13·FlyBall + 0.10·HR/FB +
+  0.08·Pull% + 0.10·Env + 0.07·Matchup` — the ceiling rewards air-ball power and
+  pull tendency (pulled fly balls clear the wall most often) — then nudged by a
+  **variance bonus** = `f(0.7·swing-and-miss + 0.3·Chase%)` and a **chalk penalty**.
 - **Consistency** = `0.28·HardHit + 0.22·ContactFloor + 0.20·SeasonHR +
   0.15·AvgEV + 0.15·xwOBA`, where **ContactFloor = 0.6·(100 − swing-and-miss) +
   0.4·Zone-Contact%** (in-zone contact is the cleanest repeatable-contact signal),
