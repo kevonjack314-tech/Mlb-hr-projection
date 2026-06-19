@@ -1,0 +1,60 @@
+name: Update lineup HR log
+
+# Recurring schedule: appends the prior day's HRs (by lineup spot) to
+# data/lineup_hr_log.csv and commits it, so the log accumulates over time.
+# GitHub-hosted runners have open network, so this logs REAL games (pybaseball
+# reaches Baseball Savant / FanGraphs / MLB StatsAPI); it falls back to the
+# deterministic simulation only if a source is unavailable.
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # daily at 12:00 UTC (after the prior day's games settle)
+  workflow_dispatch:        # allow manual runs
+    inputs:
+      date:
+        description: "End date (YYYY-MM-DD), defaults to today (UTC)"
+        required: false
+      lookback:
+        description: "Days to look back"
+        required: false
+        default: "2"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lineup-log
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Update the lineup HR log
+        run: |
+          DATE="${{ github.event.inputs.date || '' }}"
+          LOOKBACK="${{ github.event.inputs.lookback || '2' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u +%F)"; fi
+          python scripts/update_lineup_log.py "$DATE" "$LOOKBACK"
+
+      - name: Commit & push if the log changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/lineup_hr_log.csv
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update lineup HR log [skip ci]"
+            git push
+          fi

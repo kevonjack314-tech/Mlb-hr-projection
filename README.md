@@ -25,6 +25,25 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
   and weather. If the network is unavailable, it falls back to a deterministic
   **synthetic demo slate** so the app always works.
 
+## Deploy
+
+The repo is deploy-ready for any of these:
+
+- **Streamlit Community Cloud** (easiest): point [share.streamlit.io](https://share.streamlit.io)
+  at this repo, branch `main`, main file `app.py`. Auto-redeploys on push.
+- **Docker** (Render / Railway / Fly.io / anywhere): a `Dockerfile` is included
+  and honors `$PORT`.
+  ```bash
+  docker build -t mlb-hr .
+  docker run -p 8501:8501 mlb-hr           # then open http://localhost:8501
+  ```
+- **Procfile** platforms (Render/Heroku-style) use the bundled `Procfile`.
+
+For **live data** set the network egress / outbound access to reach the hosts in
+the allowlist below, and optionally set `ODDS_API_KEY` for live HR odds. CI
+(`.github/workflows/ci.yml`) runs the tests on every push/PR; a daily workflow
+keeps the lineup HR log fresh.
+
 ---
 
 ## What the app shows
@@ -46,6 +65,45 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
    (actual vs. predicted HR rate by decile), the hottest HR parks, a **Profile
    Match %** for today's bats (resemblance to recent HR hitters), and the
    **Top-5 list in each category**.
+6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
+   ULX formula): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
+   bats (underpriced profiles, 6-7), and **🚀 Deep-Space Longshots** (overlooked
+   ceiling, 7-9), diversified across games, archetypes **and lineup spots** and
+   graded on an 11-point checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
+   win %, and **EV**, plus a "build your own" mode. Strategies: ULX role-based,
+   Safest, Best-value (edge), Boom.
+7. **💎 Value Finder** — ranks the biggest **model-vs-book edges** (positive
+   **Edge%** = +EV), filterable by role / probability / live-only, with a one-click
+   value parlay.
+
+### Lineup spot (with a recurring HR-by-spot log)
+
+Every hitter carries a **lineup spot (1–9)** — live from the posted batting order
+when available, else estimated. It feeds the model three ways:
+- **Expected PA by spot** (top of order bats more, ~4.6 → 3.7 PA) folds directly
+  into the per-game HR probability.
+- **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
+  Longshots to 7-9, and checks "different lineup spots".
+- **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
+  hitter-day (date, player, spot, HR), de-duped, growing as the date advances. A
+  **seed log (~30 days)** ships in the repo so there's history out of the box, and
+  it keeps growing via:
+  - the **GitHub Actions schedule** (`.github/workflows/update-lineup-log.yml`),
+    which runs daily, appends the prior day's HRs and commits the log (runners
+    have open network, so it logs **real** games), and
+  - `scripts/update_lineup_log.py` for manual/local runs (or the `/loop` skill).
+
+  Per-player "HRs from today's spot" and the league HR-by-spot chart come from this
+  log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
+  3–4 — exactly where real middle-of-the-order power lives.)
+
+### HR odds
+
+Every hitter gets **Book Odds** to hit ≥1 HR: **live** from a sportsbook (The Odds
+API, market `batter_home_runs`) when an `ODDS_API_KEY` env var is set and the host
+is allowlisted, otherwise a **model-implied** market price (the vig-free fair price
+shaded by a typical HR-prop hold). **Edge%** = model HR% − book-implied HR%
+(positive = +EV); it powers the Best-value parlay strategy and the ticket EV.
 
 ### Features
 - **Leaderboard cards** with key metrics and a one-line rationale per player.
@@ -67,6 +125,15 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | Park factors & dimensions | Bundled `data/park_factors.csv` (Statcast/ESPN-calibrated) | same (bundled) |
 | Hitter Statcast (barrel%, EV, max EV, LA) | **Baseball Savant** exit-velo & barrels leaderboard via `pybaseball` | Deterministic modeled profiles |
 | Season counting stats (PA, HR, K%, xwOBA) | **FanGraphs** season batting via `pybaseball` | Modeled profiles |
+| **Contact%** & swing-and-miss **Whiff%** (= 100 − Contact%) | **FanGraphs** plate discipline via `pybaseball` | Modeled profiles |
+| **Chase%** (O-Swing%), **Zone-Contact%** (Z-Contact%), **Fly-Ball%** (FB%) | **FanGraphs** discipline + batted-ball via `pybaseball` | Modeled profiles |
+| **Ground-Ball%**, **Line-Drive%**, **Pull%**, **HR/FB** | **FanGraphs** batted-ball via `pybaseball` | Modeled profiles |
+| **xISO** (= xSLG − xBA) & **xSLG** (Statcast expected power) | **Baseball Savant** expected stats via `pybaseball` | Modeled profiles |
+| **Barrel/PA%** (barrels per plate appearance) | **Baseball Savant** exit-velo/barrels via `pybaseball` | Modeled profiles |
+| **Sprint speed** (ft/s, athletic context) | **Baseball Savant** sprint-speed via `pybaseball` | Modeled profiles |
+| **vs-pitch-type** (vs FB / breaking / offspeed wOBA) | **Baseball Savant** Statcast date-range (woba by pitch family) | Modeled |
+| **Pitcher peripherals** (HR/9, GB%, FB%, barrels allowed) | **FanGraphs** pitching via `pybaseball` | Modeled |
+| **Pitcher pitch mix** (FB / breaking / offspeed usage) | **Baseball Savant** Statcast date-range (pitch_type usage) | Modeled |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -93,6 +160,7 @@ statsapi.mlb.com          # schedule, probable pitchers, rosters/lineups
 baseballsavant.mlb.com    # Statcast batted-ball metrics + recent-form events
 www.fangraphs.com         # season PA / HR / K% / xwOBA
 api.open-meteo.com        # weather (temp, wind, humidity)
+api.the-odds-api.com      # live HR prop odds (optional; needs ODDS_API_KEY)
 ```
 
 Add them in your environment's **network egress settings** (see
@@ -128,6 +196,20 @@ the single best public predictor of home-run output.
 
 **Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.50**,
 15-day **0.30**, 30-day **0.20** — the hottest, most recent signal counts most.
+
+**Expected HR & regression.** A season **xHR** is computed from batted-ball quality
+(Barrels/PA, with a fly-ball term) × PA. The **HR − xHR** gap flags over- and
+under-performers; a negative gap (fewer HR than the contact deserves) is a
+positive-regression "due" signal that feeds the **Sneaky** score. *Sprint speed is
+shown as athletic context only — it has no measurable effect on HR power, so xHR is
+deliberately **not** sprint-adjusted.*
+
+**Pitch-type matchup.** The hitter's wOBA vs fastballs / breaking / offspeed is
+weighted by the probable pitcher's **pitch mix** into a pitch-arsenal edge that
+folds into the matchup multiplier and score. Both sides are **live**: the batter
+splits and the pitcher's pitch-type usage are aggregated from one shared Statcast
+date-range pull (also reused for recent form), and the pitcher's HR/9, GB%, FB% and
+barrels-allowed come from FanGraphs.
 
 ### 2. **HR probability** (≥1 HR in the game)
 
@@ -185,9 +267,15 @@ then:
   offline simulation, outcomes are drawn from the model's own probabilities, so it
   illustrates the pipeline rather than proving accuracy.)
 - **Profile Match %** — a Gaussian-kernel similarity between each current hitter and
-  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, avg/max EV,
-  launch angle, and park factor. A blended **Calibrated** score = `0.85·HR Score +
-  0.15·Profile Match` and a **Top-5 list per category** are produced from it.
+  the trailing-month **HR-hitter centroid** across barrel%, hard-hit%, EV, max EV,
+  launch angle, whiff%, fly-ball%, pull%, HR/FB, **xISO**, and park factor. A blended
+  **Calibrated** score = `0.85·HR Score + 0.15·Profile Match` and a **Top-5 list per
+  category** are produced from it.
+- **Trend strength (recency weighting)** — the centroid is **recency-weighted** with a
+  configurable half-life (default 10 days): an HR from `h` days ago counts half as
+  much as one today, so the match tracks *what's going deep now*. A **"what's
+  shifting" table** compares HR hitters' last-7-day averages vs. the full window
+  (e.g. "Pull% / HR/FB / xISO trending up"), and those shifts steer today's ranks.
 
 Data path: LIVE pulls actual HR events from Baseball Savant
 (`pybaseball.statcast`); OFFLINE simulates outcomes deterministically from the
@@ -195,14 +283,26 @@ modeled slates so the whole analysis runs without network.
 
 ### 6. Specialized scores
 
-- **Longshot** = `0.45·MaxEV + 0.25·Barrel + 0.20·Env + 0.10·Matchup`, then
-  nudged by a **variance bonus** (higher K% = more boom-or-bust) and a **chalk
-  penalty** (already-high-probability bats aren't true "longshots").
-- **Consistency** = `0.28·HardHit + 0.22·Contact(low-K) + 0.20·SeasonHR +
-  0.15·AvgEV + 0.15·xwOBA`, scaled by a sample-size confidence factor.
-- **Sneaky** = `0.30·Matchup + 0.25·Env + 0.25·FormGap + 0.20·UnderRadar`, where
-  *FormGap* rewards bats heating up beyond their season line and *UnderRadar*
-  favors lower-profile hitters who still have real batted-ball pop.
+- **Swing-and-miss signal** = `0.6·Whiff% + 0.4·K%` (normalized). Real **Whiff%**
+  (swing-and-miss rate = 100 − Contact%) is the primary input; K% is the fallback.
+- **Fly-ball multiplier** on the HR probability: `1 + (FB% − 35)/35 · 0.5`, clipped
+  to `[0.85, 1.18]`. Fly balls are the raw material of home runs, so an
+  above-average **FB%** earns a direct HR-rate boost (and below-average a haircut).
+- **HR/FB multiplier** on the HR probability: `1 + (HR/FB − 12.5)/12.5 · 0.35`,
+  clipped to `[0.88, 1.15]`. HR-per-fly-ball is the fly-ball→HR conversion rate — a
+  direct read on game power applied to balls in the air.
+- **Longshot** = `0.32·MaxEV + 0.20·Barrel + 0.13·FlyBall + 0.10·HR/FB +
+  0.08·Pull% + 0.10·Env + 0.07·Matchup` — the ceiling rewards air-ball power and
+  pull tendency (pulled fly balls clear the wall most often) — then nudged by a
+  **variance bonus** = `f(0.7·swing-and-miss + 0.3·Chase%)` and a **chalk penalty**.
+- **Consistency** = `0.28·HardHit + 0.22·ContactFloor + 0.20·SeasonHR +
+  0.15·AvgEV + 0.15·xwOBA`, where **ContactFloor = 0.6·(100 − swing-and-miss) +
+  0.4·Zone-Contact%** (in-zone contact is the cleanest repeatable-contact signal),
+  scaled by a sample-size confidence factor.
+- **Sneaky** = `0.26·Matchup + 0.22·Env + 0.22·FormGap + 0.16·UnderRadar +
+  0.14·Regression`, where *FormGap* rewards bats heating up beyond their season
+  line, *UnderRadar* favors lower-profile hitters with real batted-ball pop, and
+  *Regression* rewards hitters sitting **below their xHR** (due to bounce back).
 
 ---
 
@@ -237,6 +337,9 @@ modeled slates so the whole analysis runs without network.
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
+│   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
+│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
+│   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
 │   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme

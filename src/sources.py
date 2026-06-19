@@ -121,22 +121,22 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
                     continue
                 batting_order = t.get("battingOrder") or []
                 players = []
-                for pid in batting_order[:9]:
+                for spot, pid in enumerate(batting_order[:9], start=1):
                     p = t["players"].get(f"ID{pid}", {})
                     person = p.get("person", {})
                     bats = (p.get("batSide", {}) or {}).get("code", "R")
                     pos = (p.get("position", {}) or {}).get("abbreviation", "DH")
-                    players.append((person.get("id"), person.get("fullName"), bats, pos))
+                    players.append((person.get("id"), person.get("fullName"), bats, pos, spot))
                 if players:
                     return tuple(players)
         except Exception:
             pass
 
-    # Fall back to the active roster (hitters only-ish).
+    # Fall back to the active roster (hitters only-ish); spot is approximate.
     data = _get_json(f"{STATSAPI}/teams/{team_id}/roster", {"rosterType": "active"})
     players = []
     try:
-        for entry in data["roster"]:
+        for i, entry in enumerate(data["roster"]):
             pos = entry.get("position", {}).get("abbreviation", "")
             if pos in ("P", "SP", "RP"):
                 continue
@@ -148,7 +148,7 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
                 bats = details["people"][0]["batSide"]["code"]
             except Exception:
                 bats = "R"
-            players.append((pid, person.get("fullName"), bats, pos))
+            players.append((pid, person.get("fullName"), bats, pos, min(len(players) + 1, 9)))
     except Exception:
         return ()
     return tuple(players[:13])
@@ -222,6 +222,11 @@ def _hitter_metrics(name: str, bats: str, slate_seed: str, mlbam_id, year: int,
         profile.update(recent)
         used_real = True
 
+    splits = _batter_splits_lookup(end_date_iso, mlbam_id)
+    if splits:
+        profile.update(splits)
+        used_real = True
+
     return profile, used_real
 
 
@@ -258,13 +263,57 @@ def _recent_form_lookup(end_date_iso: str, mlbam_id=None):
         return None
 
 
-def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str) -> dict:
-    prof = demo._pitcher_profile(team_abbr, slate_seed)
+def _batter_splits_lookup(end_date_iso: str, mlbam_id=None):
+    """Return real {vs_fb, vs_br, vs_os} wOBA splits for a batter, or None."""
+    try:
+        from . import statcast
+        return statcast.lookup_batter_splits(end_date_iso, mlbam_id)
+    except Exception:
+        return None
+
+
+def _lean_from_gb(gb_pct: float | None) -> str:
+    if gb_pct is None:
+        return "NEU"
+    if gb_pct >= 46:
+        return "GB"
+    if gb_pct <= 38:
+        return "FB"
+    return "NEU"
+
+
+def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
+                     pitcher_id=None, year: int | None = None,
+                     end_date_iso: str | None = None) -> tuple[dict, bool]:
+    """Build pitcher metrics. Returns (profile, used_real_data).
+
+    Starts from the modeled profile, then overlays REAL FanGraphs peripherals
+    (HR/9, GB%, FB%, barrels allowed) by name and the REAL Statcast pitch mix by
+    id; the fly-ball/ground-ball lean is recomputed from real GB% when available.
+    """
+    prof = dict(demo._pitcher_profile(team_abbr, slate_seed))
     if name:
         prof["pitcher_name"] = name
     if throws:
         prof["pitcher_throws"] = throws
-    return prof
+    used_real = False
+
+    try:
+        from . import statcast
+        peri = statcast.lookup_pitching(year, name) if year else None
+        if peri:
+            prof.update(peri)
+            if "pitcher_gb_pct" in peri:
+                prof["pitcher_lean"] = _lean_from_gb(peri.get("pitcher_gb_pct"))
+            used_real = True
+        if end_date_iso:
+            mix = statcast.lookup_pitch_mix(end_date_iso, pitcher_id)
+            if mix:
+                prof.update(mix)
+                used_real = True
+    except Exception:
+        pass
+    return prof, used_real
 
 
 def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]]:
@@ -279,6 +328,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
     year = season_year_for(game_date)
     real_hitters = 0
     total_hitters = 0
+    real_pitchers = 0
     rows = []
     for g in games:
         home, away = g["home"], g["away"]
@@ -286,8 +336,13 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         away_hand = fetch_pitcher_hand(g.get("away_pitcher_id"))
         weather = fetch_weather(home, date_iso)
 
-        home_pitcher = _pitcher_metrics(g.get("home_pitcher_name"), home_hand, home, slate_seed)
-        away_pitcher = _pitcher_metrics(g.get("away_pitcher_name"), away_hand, away, slate_seed)
+        home_pitcher, hp_real = _pitcher_metrics(
+            g.get("home_pitcher_name"), home_hand, home, slate_seed,
+            g.get("home_pitcher_id"), year, date_iso)
+        away_pitcher, ap_real = _pitcher_metrics(
+            g.get("away_pitcher_name"), away_hand, away, slate_seed,
+            g.get("away_pitcher_id"), year, date_iso)
+        real_pitchers += int(hp_real) + int(ap_real)
 
         for side, team, team_id, opp, opp_pitcher in (
             ("away", away, g["away_id"], home, home_pitcher),
@@ -299,10 +354,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                 tinfo = demo.TEAMS.get(team)
                 if not tinfo:
                     continue
-                roster = [(None, n, b, p) for n, b, _t, p in tinfo["hitters"]]
+                roster = [(None, n, b, p, demo.demo_spot_for_index(i) or 9)
+                          for i, (n, b, _t, p) in enumerate(tinfo["hitters"])]
             park = get_park(home)
             team_name = park["team_name"] if (park and team == home) else demo.TEAMS.get(team, {}).get("name", team)
-            for pid, name, bats, pos in roster:
+            for pid, name, bats, pos, spot in roster:
                 if not name:
                     continue
                 metrics, used_real = _hitter_metrics(
@@ -316,6 +372,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "team_name": demo.TEAMS.get(team, {}).get("name", team),
                     "bats": bats or "R",
                     "position": pos or "DH",
+                    "lineup_spot": spot,
                     "opponent": opp,
                     "home_team": home,
                     "is_home": side == "home",
@@ -340,6 +397,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         notes.append(
             "Statcast/FanGraphs feed unavailable (host not allowlisted or "
             "pybaseball missing) — batted-ball metrics modeled. See README."
+        )
+    if real_pitchers:
+        notes.append(
+            f"Real pitcher peripherals + pitch mix resolved for {real_pitchers}/"
+            f"{2 * len(games)} probable starters; remainder modeled."
         )
     return pd.DataFrame(rows), notes
 

@@ -21,6 +21,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from .lineup import demo_spot_for_index
+
 # team_abbr -> (probable pitcher name, throws L/R, pitcher quality tier 1-5,
 #               groundball-or-flyball lean: 'GB'/'NEU'/'FB')
 # Hitters: (name, bats L/R/S, power tier 1-5, primary position)
@@ -356,6 +358,39 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     la = rng.uniform(8, 19)  # sweet-spot launch ~ 8-19 deg
     xwoba = {1: 0.300, 2: 0.320, 3: 0.340, 4: 0.365, 5: 0.395}[tier] + rng.uniform(-0.02, 0.02)
     k_pct = {1: 18, 2: 21, 3: 23, 4: 25, 5: 26}[tier] + rng.uniform(-3, 3)
+    # Swing-and-miss (whiff%) = swings that miss / swings. Power hitters tend to
+    # swing-and-miss more; it tracks K% but is a distinct, swing-level signal.
+    whiff_pct = {1: 18.0, 2: 21.0, 3: 24.0, 4: 27.0, 5: 30.0}[tier] + rng.uniform(-3.5, 3.5)
+    whiff_pct = max(10.0, min(40.0, whiff_pct + (k_pct - {1: 18, 2: 21, 3: 23, 4: 25, 5: 26}[tier]) * 0.5))
+    # Plate discipline: chase (O-Swing%) tracks whiff; zone-contact (Z-Contact%)
+    # is the inverse. Fly-ball% rises with power/launch and is a real HR driver.
+    chase_pct = max(16.0, min(40.0, 22.0 + (whiff_pct - 24.0) * 0.6 + rng.uniform(-3.0, 3.0)))
+    zone_contact_pct = max(72.0, min(96.0, 100.0 - whiff_pct * 0.55 + rng.uniform(-3.0, 3.0)))
+    fb_pct = {1: 30.0, 2: 33.0, 3: 36.0, 4: 39.0, 5: 42.0}[tier] + (la - 13.0) * 0.6 + rng.uniform(-4.0, 4.0)
+    fb_pct = max(20.0, min(50.0, fb_pct))
+    # Batted-ball distribution: GB% + LD% + FB% ≈ 100. Line drives ~21% league.
+    ld_pct = max(14.0, min(28.0, 21.0 + rng.uniform(-3.0, 3.0)))
+    gb_pct = max(28.0, min(58.0, 100.0 - fb_pct - ld_pct))
+    # Pull% (~40% league) rises with power; HR/FB is the fly-ball -> HR conversion
+    # rate (~12-13% league), strongly tied to raw power tier.
+    pull_pct = max(30.0, min(52.0, 38.0 + (tier - 3) * 2.0 + rng.uniform(-4.0, 4.0)))
+    hr_fb = {1: 6.0, 2: 9.0, 3: 12.0, 4: 16.0, 5: 20.0}[tier] + (barrel - {1: 4.5, 2: 7.0, 3: 9.5, 4: 13.0, 5: 17.0}[tier]) * 0.4 + rng.uniform(-2.0, 2.0)
+    hr_fb = max(3.0, min(28.0, hr_fb))
+    # Statcast expected power: xISO (= xSLG - xBA) and xSLG, contact-quality based.
+    xiso = {1: 0.110, 2: 0.140, 3: 0.175, 4: 0.215, 5: 0.255}[tier] + rng.uniform(-0.025, 0.025)
+    xiso = max(0.070, min(0.300, xiso))
+    xba_est = max(0.210, min(0.300, 0.250 + rng.uniform(-0.03, 0.03)))
+    xslg = round(xba_est + xiso, 3)
+    # Barrels per plate appearance (%): barrel rate scaled by how often the bat
+    # puts a ball in play (BBE/PA ~ 0.6). A premier season-long HR predictor.
+    brl_pa = round(max(1.5, min(13.0, barrel * rng.uniform(0.55, 0.68))), 1)
+    # Sprint speed (ft/s) — athletic context (not a HR driver; shown for color).
+    sprint_speed = round(max(23.0, min(30.5, rng.gauss(27.0, 1.3))), 1)
+    # Performance vs pitch families (wOBA-like). Most hitters handle fastballs
+    # best; breaking/offspeed separate the disciplined from the exploitable.
+    vs_fb = round(max(0.250, min(0.440, xwoba + rng.uniform(-0.010, 0.055))), 3)
+    vs_br = round(max(0.225, min(0.420, xwoba + rng.uniform(-0.060, 0.020))), 3)
+    vs_os = round(max(0.225, min(0.420, xwoba + rng.uniform(-0.050, 0.030))), 3)
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -379,6 +414,22 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "launch_angle": round(la, 1),
         "xwoba": round(xwoba, 3),
         "k_pct": round(max(10.0, k_pct), 1),
+        "whiff_pct": round(whiff_pct, 1),
+        "contact_pct": round(100.0 - whiff_pct, 1),
+        "chase_pct": round(chase_pct, 1),
+        "zone_contact_pct": round(zone_contact_pct, 1),
+        "fb_pct": round(fb_pct, 1),
+        "gb_pct": round(gb_pct, 1),
+        "ld_pct": round(ld_pct, 1),
+        "pull_pct": round(pull_pct, 1),
+        "hr_fb": round(hr_fb, 1),
+        "xiso": round(xiso, 3),
+        "xslg": xslg,
+        "brl_pa": brl_pa,
+        "sprint_speed": sprint_speed,
+        "vs_fb": vs_fb,
+        "vs_br": vs_br,
+        "vs_os": vs_os,
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),
@@ -402,6 +453,10 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     barrel_allowed = {1: 11.0, 2: 9.5, 3: 8.0, 4: 6.8, 5: 5.5}[tier] + rng.uniform(-1, 1)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
+    # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
+    pmix_fb = rng.randint(44, 64)
+    pmix_br = min(rng.randint(20, 38), 95 - pmix_fb)
+    pmix_os = 100 - pmix_fb - pmix_br
     return {
         "pitcher_name": name,
         "pitcher_throws": throws,
@@ -411,6 +466,9 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "pitcher_barrel_pct_allowed": round(barrel_allowed, 1),
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
+        "pitcher_mix_fb": pmix_fb,
+        "pitcher_mix_br": pmix_br,
+        "pitcher_mix_os": pmix_os,
     }
 
 
@@ -450,7 +508,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
             ("home", home, away, away_pitcher),
         ):
             team_info = TEAMS[team]
-            for name, bats, tier, pos in team_info["hitters"]:
+            for idx, (name, bats, tier, pos) in enumerate(team_info["hitters"]):
                 prof = _hitter_profile(name, bats, tier, slate_seed)
                 row = {
                     "player": name,
@@ -458,6 +516,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "team_name": team_info["name"],
                     "bats": bats,
                     "position": pos,
+                    "lineup_spot": demo_spot_for_index(idx),
                     "opponent": opp,
                     "home_team": home,
                     "is_home": side == "home",

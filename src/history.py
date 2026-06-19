@@ -41,8 +41,11 @@ from .model import score_slate
 from .parks import get_park, park_hr_multiplier
 
 # Metrics that define the "HR hitter profile" used for similarity matching.
-PROFILE_METRICS = ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
-                   "launch_angle", "park_factor"]
+# GB% and LD% are intentionally left out of the centroid (collinear with FB%)
+# but still appear in the shared-profile lift table below.
+PROFILE_METRICS = ["barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
+                   "launch_angle", "whiff_pct", "fb_pct", "pull_pct",
+                   "hr_fb", "xiso", "park_factor"]
 
 # Savant team codes -> our park abbreviations (handles the handful that differ).
 _SAVANT_TEAM_FIX = {
@@ -140,8 +143,11 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 if isinstance(srow, pd.DataFrame):
                     srow = srow.iloc[0]
                 prof = {m: srow.get(m) for m in
-                        ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
-                         "launch_angle", "xwoba", "hr_per_pa"]}
+                        ["barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
+                         "launch_angle", "whiff_pct", "chase_pct",
+                         "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
+                         "pull_pct", "hr_fb", "xiso", "xslg", "sprint_speed",
+                         "xwoba", "hr_per_pa"]}
             rows.append({
                 "date": str(r.get("game_date")),
                 "player": r.get("player_name"),
@@ -183,9 +189,13 @@ def summarize_hr_profile(events: pd.DataFrame, slate: pd.DataFrame) -> dict:
 
     metric_rows = []
     for m, label in [
-        ("barrel_pct", "Barrel%"), ("hard_hit_pct", "Hard-Hit%"),
+        ("barrel_pct", "Barrel%"), ("brl_pa", "Barrel/PA%"),
+        ("hard_hit_pct", "Hard-Hit%"),
         ("avg_ev", "Avg EV"), ("max_ev", "Max EV"),
-        ("launch_angle", "Launch Angle"), ("hr_per_pa", "Season HR/PA"),
+        ("launch_angle", "Launch Angle"), ("whiff_pct", "Whiff%"),
+        ("fb_pct", "Fly-Ball%"), ("gb_pct", "Ground-Ball%"),
+        ("ld_pct", "Line-Drive%"), ("pull_pct", "Pull%"), ("hr_fb", "HR/FB"),
+        ("xiso", "xISO"), ("hr_per_pa", "Season HR/PA"),
         ("park_factor", "Park Factor"),
     ]:
         if m not in events.columns:
@@ -220,18 +230,97 @@ def summarize_hr_profile(events: pd.DataFrame, slate: pd.DataFrame) -> dict:
     return out
 
 
-def hr_profile_centroid(events: pd.DataFrame) -> dict | None:
-    """Mean vector + spread of the HR-hitter profile, for similarity scoring."""
+def _recency_weights(events: pd.DataFrame, end_date_iso: str | None,
+                     half_life_days: float) -> np.ndarray | None:
+    """Exponential-decay weights by how many days before `end_date` each HR fell.
+
+    A half-life of `h` days means an HR from `h` days ago counts half as much as
+    one today, so the profile tracks *what is working now*, not a month ago.
+    """
+    if end_date_iso is None or "date" not in events.columns or half_life_days <= 0:
+        return None
+    try:
+        end = dt.date.fromisoformat(end_date_iso)
+        dates = pd.to_datetime(events["date"], errors="coerce").dt.date
+        days_ago = dates.map(lambda d: (end - d).days if pd.notna(d) else np.nan)
+        w = np.power(0.5, days_ago.astype(float) / float(half_life_days))
+        w = w.fillna(w[w.notna()].mean() if w.notna().any() else 1.0).to_numpy()
+        return w
+    except Exception:
+        return None
+
+
+def hr_profile_centroid(events: pd.DataFrame, end_date_iso: str | None = None,
+                        half_life_days: float = 10.0) -> dict | None:
+    """Recency-weighted mean + spread of the HR-hitter profile, for similarity.
+
+    Recent HR hitters define "what's going deep now": weights decay with a
+    configurable half-life (default 10 days). Pass half_life_days<=0 / no date to
+    fall back to an unweighted centroid.
+    """
     if events.empty:
         return None
+    weights = _recency_weights(events, end_date_iso, half_life_days)
     centroid, scales = {}, {}
     for m in PROFILE_METRICS:
-        if m in events.columns:
-            vals = pd.to_numeric(events[m], errors="coerce").dropna()
-            if len(vals):
-                centroid[m] = float(vals.mean())
-                scales[m] = float(vals.std() or 1.0)
-    return {"centroid": centroid, "scales": scales} if centroid else None
+        if m not in events.columns:
+            continue
+        vals = pd.to_numeric(events[m], errors="coerce")
+        mask = vals.notna()
+        v = vals[mask].to_numpy()
+        if not len(v):
+            continue
+        if weights is not None:
+            w = weights[mask.to_numpy()]
+            wmean = float(np.average(v, weights=w))
+            wvar = float(np.average((v - wmean) ** 2, weights=w))
+            centroid[m] = wmean
+            scales[m] = float(np.sqrt(wvar) or 1.0)
+        else:
+            centroid[m] = float(v.mean())
+            scales[m] = float(v.std() or 1.0)
+    if not centroid:
+        return None
+    return {"centroid": centroid, "scales": scales,
+            "half_life_days": half_life_days if weights is not None else None}
+
+
+def recent_trend(events: pd.DataFrame, end_date_iso: str, recent_days: int = 7) -> pd.DataFrame:
+    """What's trending among HR hitters: last `recent_days` vs the full window.
+
+    Positive 'Trend' means HR hitters' average on that metric is higher in the
+    most recent stretch than across the whole window — the profile is shifting.
+    """
+    if events.empty or "date" not in events.columns:
+        return pd.DataFrame()
+    end = dt.date.fromisoformat(end_date_iso)
+    cutoff = end - dt.timedelta(days=recent_days)
+    dates = pd.to_datetime(events["date"], errors="coerce").dt.date
+    recent = events[dates > cutoff]
+    if recent.empty:
+        return pd.DataFrame()
+    rows = []
+    for m, label in [("barrel_pct", "Barrel%"), ("max_ev", "Max EV"),
+                     ("fb_pct", "Fly-Ball%"), ("pull_pct", "Pull%"),
+                     ("hr_fb", "HR/FB"), ("xiso", "xISO"), ("park_factor", "Park Factor")]:
+        if m not in events.columns:
+            continue
+        full = pd.to_numeric(events[m], errors="coerce").mean()
+        rec = pd.to_numeric(recent[m], errors="coerce").mean()
+        if np.isnan(full) or np.isnan(rec) or full == 0:
+            continue
+        delta_pct = (rec - full) / abs(full) * 100.0
+        rows.append({
+            "Metric": label,
+            f"Last {recent_days}d": round(float(rec), 3),
+            "Full window": round(float(full), 3),
+            "Trend": (f"+{delta_pct:.0f}%" if delta_pct >= 0 else f"{delta_pct:.0f}%"),
+            "_sort": abs(delta_pct),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("_sort", ascending=False).drop(columns="_sort").reset_index(drop=True)
+    return df
 
 
 def add_profile_similarity(slate: pd.DataFrame, centroid: dict | None) -> pd.DataFrame:
