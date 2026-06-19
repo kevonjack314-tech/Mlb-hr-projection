@@ -66,10 +66,17 @@ when available, else estimated. It feeds the model three ways:
 - **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
   Longshots to 7-9, and checks "different lineup spots".
 - **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
-  hitter-day (date, player, spot, HR), de-duped, growing as the date advances.
-  The app appends to it on each run; `scripts/update_lineup_log.py` is a daily
-  updater (cron / CI / the `/loop` skill). Per-player "HRs from today's spot" and
-  the league HR-by-spot chart come from this log and nudge parlay selection.
+  hitter-day (date, player, spot, HR), de-duped, growing as the date advances. A
+  **seed log (~30 days)** ships in the repo so there's history out of the box, and
+  it keeps growing via:
+  - the **GitHub Actions schedule** (`.github/workflows/update-lineup-log.yml`),
+    which runs daily, appends the prior day's HRs and commits the log (runners
+    have open network, so it logs **real** games), and
+  - `scripts/update_lineup_log.py` for manual/local runs (or the `/loop` skill).
+
+  Per-player "HRs from today's spot" and the league HR-by-spot chart come from this
+  log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
+  3–4 — exactly where real middle-of-the-order power lives.)
 
 ### HR odds
 

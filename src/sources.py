@@ -354,7 +354,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                 tinfo = demo.TEAMS.get(team)
                 if not tinfo:
                     continue
-                roster = [(None, n, b, p, min(i + 1, 9))
+                roster = [(None, n, b, p, demo.demo_spot_for_index(i) or 9)
                           for i, (n, b, _t, p) in enumerate(tinfo["hitters"])]
             park = get_park(home)
             team_name = park["team_name"] if (park and team == home) else demo.TEAMS.get(team, {}).get("name", team)

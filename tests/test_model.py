@@ -215,7 +215,8 @@ def test_lineup_spot_and_recurring_log(tmp_path, monkeypatch):
     assert spot_role_fit(9, "Longshot") > spot_role_fit(3, "Longshot")
 
     df = _slate()
-    assert df["lineup_spot"].between(1, 9).all()
+    spots = df["lineup_spot"].dropna()
+    assert spots.between(1, 9).all() and spots.nunique() == 9   # bench bats are NaN
     assert df["expected_pa"].between(3.7, 4.6).all()
 
     # Recurring log writes to an isolated path and accumulates (idempotent).

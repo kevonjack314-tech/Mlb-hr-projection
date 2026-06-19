@@ -43,6 +43,16 @@ LEAGUE_HR_REL_BY_SPOT = {1: 0.96, 2: 1.05, 3: 1.10, 4: 1.12, 5: 1.04,
 SPOT_ROLE = {1: "Value", 2: "Anchor", 3: "Anchor", 4: "Anchor", 5: "Anchor",
              6: "Value", 7: "Value", 8: "Longshot", 9: "Longshot"}
 
+# Maps a demo roster index (sluggers listed first) to a realistic batting-order
+# spot: top bats hit 3-4, then 2-5-1, then 6-9. The 10th+ bat is a bench player
+# (None) so it doesn't start. Real slates use the posted lineup instead.
+_DEMO_SPOT_ORDER = [3, 4, 2, 5, 1, 6, 7, 8, 9]
+
+
+def demo_spot_for_index(idx: int):
+    """Realistic lineup spot for a demo roster index, or None for bench bats."""
+    return _DEMO_SPOT_ORDER[idx] if 0 <= idx < len(_DEMO_SPOT_ORDER) else None
+
 
 def expected_pa(spot) -> float:
     try:

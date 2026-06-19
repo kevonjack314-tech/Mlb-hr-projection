@@ -21,6 +21,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from .lineup import demo_spot_for_index
+
 # team_abbr -> (probable pitcher name, throws L/R, pitcher quality tier 1-5,
 #               groundball-or-flyball lean: 'GB'/'NEU'/'FB')
 # Hitters: (name, bats L/R/S, power tier 1-5, primary position)
@@ -514,7 +516,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "team_name": team_info["name"],
                     "bats": bats,
                     "position": pos,
-                    "lineup_spot": idx + 1 if idx < 9 else 9,
+                    "lineup_spot": demo_spot_for_index(idx),
                     "opponent": opp,
                     "home_team": home,
                     "is_home": side == "home",
