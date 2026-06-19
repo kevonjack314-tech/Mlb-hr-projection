@@ -26,6 +26,8 @@ from src.model import (
     RECENT_FORM_WEIGHTS,
     score_slate,
 )
+from src.odds import attach_odds, format_american
+from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
 from src.sources import get_slate
 
 st.set_page_config(
@@ -65,7 +67,9 @@ GLOSSARY = {
     "HR Score": "Composite 0-100 rating blending batted-ball quality, season & recent HR rate, matchup, and park/weather.",
     "HR Prob (game)": "Modeled probability the hitter hits ≥1 HR in this game (per-PA rate compounded over ~4.1 PA).",
     "xHR (game)": "Expected home runs in THIS game = per-PA HR rate × expected PA.",
-    "Fair Odds": "Vig-free American odds implied by the game HR probability (handy for spotting +EV props).",
+    "Fair Odds": "Vig-free American odds implied by the model's game HR probability.",
+    "Book Odds": "American odds to hit ≥1 HR you'd actually bet — LIVE from a sportsbook when an ODDS_API_KEY is configured, else a model-implied market price (fair price + typical hold).",
+    "Edge%": "Model HR% minus the book's implied HR%. Positive = +EV (model thinks the bat is underpriced). With model-implied odds it sits near −hold (the vig).",
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
@@ -114,6 +118,11 @@ def sidebar_controls():
         "Try live data (MLB StatsAPI + weather)", value=True,
         help="If off (or if the network is unavailable), a deterministic synthetic slate is used.",
     )
+    live_odds = st.sidebar.toggle(
+        "Use live HR odds (needs ODDS_API_KEY)", value=False,
+        help="Pull real sportsbook HR odds from The Odds API when an ODDS_API_KEY "
+             "env var is set. Otherwise odds are model-implied (fair price + hold).",
+    )
     lookback = st.sidebar.slider(
         "Backtest lookback (days)", min_value=7, max_value=45, value=31, step=1,
         help="Window of past HRs analyzed for the Trends tab (default ~1 month).",
@@ -130,7 +139,7 @@ def sidebar_controls():
         load_hr_history.clear()
         st.rerun()
 
-    return game_date, prefer_live, lookback, half_life
+    return game_date, prefer_live, lookback, half_life, live_odds
 
 
 def methodology_sidebar():
@@ -216,6 +225,8 @@ DISPLAY_COLUMNS = {
     "hr_prob_game": "HR Prob (game)",
     "xhr": "xHR (game)",
     "fair_odds": "Fair Odds",
+    "book_odds": "Book Odds",
+    "edge_pct": "Edge%",
     "longshot_score": "Longshot",
     "consistency_score": "Consistency",
     "sneaky_score": "Sneaky",
@@ -275,6 +286,8 @@ COLUMN_CONFIG = {
     "vs BR": st.column_config.NumberColumn("vs BR", help=GLOSSARY["vs BR"], format="%.3f"),
     "vs OS": st.column_config.NumberColumn("vs OS", help=GLOSSARY["vs OS"], format="%.3f"),
     "Fair Odds": st.column_config.NumberColumn("Fair Odds", help=GLOSSARY["Fair Odds"], format="%+d"),
+    "Book Odds": st.column_config.NumberColumn("Book Odds", help=GLOSSARY["Book Odds"], format="%+d"),
+    "Edge%": st.column_config.NumberColumn("Edge%", help=GLOSSARY["Edge%"], format="%+.1f"),
     "Longshot": st.column_config.ProgressColumn(
         "Longshot", help=GLOSSARY["Longshot"], min_value=0, max_value=100, format="%.1f"
     ),
@@ -383,8 +396,8 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
-            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "brl_pa", "fb_pct",
-            "hr_fb", "pull_pct", "whiff_pct", "chase_pct", "park_factor",
+            "hr_prob_game", "book_odds", "edge_pct", "max_ev", "barrel_pct", "brl_pa",
+            "fb_pct", "hr_fb", "pull_pct", "whiff_pct", "park_factor",
             "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
@@ -570,11 +583,101 @@ def tab_trends(history, projection_slate):
     )
 
 
+def _render_parlay(result, stake):
+    legs = result["legs"]
+    s = result["summary"]
+    if legs.empty or s.get("n_legs", 0) == 0:
+        st.warning("Not enough qualifying bats to build this parlay. Loosen filters or change strategy.")
+        return
+
+    # Leg cards.
+    cols = st.columns(min(len(legs), 3))
+    for i, (_, leg) in enumerate(legs.iterrows()):
+        with cols[i % len(cols)]:
+            with st.container(border=True):
+                role = leg.get("role", "Leg")
+                st.markdown(f"### {ROLE_EMOJI.get(role, '•')} {role}")
+                st.markdown(f"**{leg['player']}** · {leg['team']} vs {leg['opponent']}")
+                live_tag = " 🟢LIVE" if leg.get("odds_is_live") else ""
+                st.markdown(f"## {format_american(leg['book_odds'])}{live_tag}")
+                m1, m2 = st.columns(2)
+                m1.metric("HR Prob", f"{leg['hr_prob_game']*100:.0f}%")
+                m2.metric("Edge", f"{leg['edge_pct']:+.1f}%")
+                st.caption(f"_{leg['archetype']}_ · {leg.get('rationale','')}")
+
+    # Combined ticket.
+    st.markdown("### 🎟️ The Ticket")
+    light = s["light"]
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Parlay odds", s["combined_american_str"])
+    c2.metric("Model win %", f"{s['model_prob']}%")
+    c3.metric("Implied %", f"{s['implied_prob']}%")
+    c4.metric("EV / $1", f"{s['ev_pct']:+.0f}%")
+    profit = stake * (s["combined_decimal"] - 1)
+    c5.metric(f"${stake:.0f} pays", f"${profit:,.0f}")
+
+    ev = s["ev_pct"]
+    if s.get("any_live") and ev > 0:
+        st.success(f"{light} · **+EV** at the current live price ({ev:+.0f}% per $1). Value spot.")
+    elif s.get("any_live"):
+        st.info(f"{light} · {ev:+.0f}% EV at live odds — no edge; shop for a better price.")
+    else:
+        st.info(f"{light} · EV is {ev:+.0f}% on model-implied odds (you pay the hold). "
+                "Turn on live odds + shop books to find real +EV.")
+
+    # Checklist (ULX 10-point).
+    with st.expander(f"📋 ULX checklist — {s['checks_passed']}/{s['checks_total']} · {light}", expanded=True):
+        cc = st.columns(2)
+        for i, (label, ok) in enumerate(result["checklist"]):
+            cc[i % 2].markdown(f"{'✅' if ok else '⬜'} {label}")
+
+    disp = legs[[c for c in ["role", "player", "team", "opponent", "pitcher_name",
+                             "book_odds", "hr_prob_game", "edge_pct", "archetype",
+                             "rationale"] if c in legs.columns]].copy()
+    st.download_button("⬇️ Export parlay to CSV", disp.to_csv(index=False).encode(),
+                       file_name="hr_parlay.csv", mime="text/csv")
+
+
+def tab_parlay(df):
+    st.subheader("🎰 HR Parlay Builder")
+    st.caption(
+        "Build parlays with **roles, not names** (the ULX formula): an **⚓ Anchor** "
+        "(highest-confidence bat), **💰 Value** bats (underpriced profiles), and "
+        "**🚀 Deep-Space Longshots** (overlooked ceiling). Diversified across games & "
+        "archetypes, graded on a 10-point checklist. *Research/entertainment only.*"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    n_legs = c1.slider("Legs", 1, 5, 3)
+    strategy = c2.selectbox(
+        "Strategy",
+        ["ulx", "safe", "value", "boom"],
+        format_func={"ulx": "ULX role-based", "safe": "Safest (highest prob)",
+                     "value": "Best value (edge)", "boom": "Boom (longshots)"}.get,
+    )
+    max_per_game = c3.selectbox("Max bats / game", [1, 2], index=0)
+    stake = c4.number_input("Stake ($)", min_value=1.0, value=10.0, step=5.0)
+    diversify = st.checkbox("Diversify archetypes (avoid same-profile stacking)", value=True)
+
+    result = generate_parlay(df, n_legs=n_legs, strategy=strategy,
+                             max_per_game=int(max_per_game), diversify_arch=diversify)
+    _render_parlay(result, stake)
+
+    st.markdown("---")
+    with st.expander("🛠️ Build your own parlay (pick the bats)"):
+        choices = st.multiselect(
+            "Players", sorted(df["player"].unique()),
+            help="Pick 1-8 bats; roles are auto-assigned from each bat's HR odds band.",
+        )
+        if choices:
+            _render_parlay(summarize_selection(df, choices), stake)
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def main():
-    game_date, prefer_live, lookback, half_life = sidebar_controls()
+    game_date, prefer_live, lookback, half_life, live_odds = sidebar_controls()
     methodology_sidebar()
 
     st.title("⚾ MLB Home Run Projection Tool")
@@ -607,6 +710,7 @@ def main():
         start_iso, end_iso, prefer_live, float(half_life)
     )
     scored = add_profile_similarity(scored, centroid)
+    scored = attach_odds(scored, end_iso, use_live=live_odds)
     history = (events, summary, centroid, calib, trend, h_source, h_notes,
                start_iso, end_iso, half_life)
 
@@ -615,12 +719,14 @@ def main():
         st.warning("No hitters match the current filters.")
         return
 
-    st.markdown(f"**{len(filtered)}** hitters across **{filtered['game'].nunique()}** games after filters.")
+    odds_badge = "🟢 LIVE" if (filtered.get("odds_is_live", pd.Series([False])).any()) else "🟡 model-implied"
+    st.markdown(f"**{len(filtered)}** hitters · **{filtered['game'].nunique()}** games · "
+                f"HR odds: {odds_badge}")
 
-    t1, t2, t3, t4, t5 = st.tabs(
+    t1, t2, t3, t4, t5, t6 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
          "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
-         "📈 HR Trends & Backtest"]
+         "📈 HR Trends & Backtest", "🎰 Parlay Builder"]
     )
     with t1:
         tab_longshots(filtered)
@@ -632,6 +738,8 @@ def main():
         tab_all(filtered)
     with t5:
         tab_trends(history, filtered)
+    with t6:
+        tab_parlay(filtered)
 
 
 if __name__ == "__main__":

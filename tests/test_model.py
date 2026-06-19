@@ -164,3 +164,40 @@ def test_live_pitch_mix_and_splits_aggregation():
         sc._statcast_range = orig
         sc.get_pitch_mix_table.cache_clear()
         sc.get_batter_pitch_splits.cache_clear()
+
+
+def test_odds_and_parlay_generator():
+    from src.odds import (american_to_decimal, american_to_prob, attach_odds,
+                          decimal_to_american, model_market_odds)
+    from src.parlay import generate_parlay, summarize_selection
+
+    # Odds math round-trips and book odds are worse than fair (you pay the hold).
+    assert abs(american_to_decimal(+100) - 2.0) < 1e-9
+    assert decimal_to_american(2.0) == 100
+    assert abs(american_to_prob(-110) - 0.5238) < 1e-3
+    assert model_market_odds(0.25) > 0  # underdog price
+    assert american_to_prob(model_market_odds(0.25)) > 0.25  # shaded up by hold
+
+    df = attach_odds(_slate(), "2026-06-18", use_live=False)
+    for c in ("book_odds", "edge_pct", "implied_prob"):
+        assert c in df.columns
+
+    # ULX composition by leg count.
+    expect = {1: ["Anchor"], 2: ["Anchor", "Value"],
+              3: ["Anchor", "Value", "Longshot"],
+              4: ["Anchor", "Value", "Value", "Longshot"],
+              5: ["Anchor", "Value", "Value", "Longshot", "Longshot"]}
+    for n in range(1, 6):
+        res = generate_parlay(df, n_legs=n, strategy="ulx")
+        legs = res["legs"]
+        assert len(legs) == n
+        assert list(legs["role"]) == expect[n]
+        # No two legs from the same game (diversification).
+        assert legs["game"].nunique() == n
+        s = res["summary"]
+        assert s["combined_decimal"] >= 1.0 and 0 <= s["model_prob"] <= 100
+        assert s["checks_total"] == 10
+
+    # Custom selection grades too.
+    cust = summarize_selection(df, list(df["player"].head(3)))
+    assert cust["summary"]["n_legs"] == 3

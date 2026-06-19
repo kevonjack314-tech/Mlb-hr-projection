@@ -46,6 +46,20 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
    (actual vs. predicted HR rate by decile), the hottest HR parks, a **Profile
    Match %** for today's bats (resemblance to recent HR hitters), and the
    **Top-5 list in each category**.
+6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
+   ULX formula): an **⚓ Anchor** (highest-confidence bat), **💰 Value** bats
+   (underpriced profiles), and **🚀 Deep-Space Longshots** (overlooked ceiling),
+   diversified across games & archetypes and graded on a 10-point checklist with a
+   🟢/🟡/🔴 light. Shows combined odds, model win %, and **EV**, plus a "build your
+   own" mode. Strategies: ULX role-based, Safest, Best-value (edge), Boom.
+
+### HR odds
+
+Every hitter gets **Book Odds** to hit ≥1 HR: **live** from a sportsbook (The Odds
+API, market `batter_home_runs`) when an `ODDS_API_KEY` env var is set and the host
+is allowlisted, otherwise a **model-implied** market price (the vig-free fair price
+shaded by a typical HR-prop hold). **Edge%** = model HR% − book-implied HR%
+(positive = +EV); it powers the Best-value parlay strategy and the ticket EV.
 
 ### Features
 - **Leaderboard cards** with key metrics and a one-line rationale per player.
@@ -102,6 +116,7 @@ statsapi.mlb.com          # schedule, probable pitchers, rosters/lineups
 baseballsavant.mlb.com    # Statcast batted-ball metrics + recent-form events
 www.fangraphs.com         # season PA / HR / K% / xwOBA
 api.open-meteo.com        # weather (temp, wind, humidity)
+api.the-odds-api.com      # live HR prop odds (optional; needs ODDS_API_KEY)
 ```
 
 Add them in your environment's **network egress settings** (see
@@ -278,6 +293,8 @@ modeled slates so the whole analysis runs without network.
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
+│   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
+│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
 │   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme

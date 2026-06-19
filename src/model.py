@@ -33,6 +33,8 @@ from .parks import (
 LEAGUE_HR_PER_PA = 0.034
 # Expected plate appearances for a starter in a 9-inning game.
 DEFAULT_PA = 4.1
+# Soft ceiling on the per-PA HR rate (keeps top game-HR odds realistic).
+P_HR_CEIL = 0.085
 
 # --- Reference ranges (≈5th–95th percentile of qualified hitters) for 0-100 scaling.
 REF = {
@@ -333,9 +335,11 @@ def score_row(row: pd.Series) -> dict:
         + 0.25 * recent_capped
         + 0.20 * quality_implied
     )
-    p_adj = float(np.clip(
-        base_rate * matchup_mult * env["env_mult"] * fb_mult * hr_fb_mult,
-        0.002, 0.095))
+    raw_rate = base_rate * matchup_mult * env["env_mult"] * fb_mult * hr_fb_mult
+    # Soft ceiling instead of a hard clip: probabilities saturate smoothly toward
+    # P_CEIL so elite bats keep their ordering (no bunching at the cap) and the
+    # implied odds stay in a realistic HR-prop range (top spots ~ +280..+360).
+    p_adj = float(max(0.002, P_HR_CEIL * (1.0 - np.exp(-raw_rate / P_HR_CEIL))))
     pa = DEFAULT_PA
     p_game = 1.0 - (1.0 - p_adj) ** pa
     out["hr_prob_pa"] = round(p_adj, 4)
