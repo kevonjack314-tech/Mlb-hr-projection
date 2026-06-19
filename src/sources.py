@@ -121,22 +121,22 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
                     continue
                 batting_order = t.get("battingOrder") or []
                 players = []
-                for pid in batting_order[:9]:
+                for spot, pid in enumerate(batting_order[:9], start=1):
                     p = t["players"].get(f"ID{pid}", {})
                     person = p.get("person", {})
                     bats = (p.get("batSide", {}) or {}).get("code", "R")
                     pos = (p.get("position", {}) or {}).get("abbreviation", "DH")
-                    players.append((person.get("id"), person.get("fullName"), bats, pos))
+                    players.append((person.get("id"), person.get("fullName"), bats, pos, spot))
                 if players:
                     return tuple(players)
         except Exception:
             pass
 
-    # Fall back to the active roster (hitters only-ish).
+    # Fall back to the active roster (hitters only-ish); spot is approximate.
     data = _get_json(f"{STATSAPI}/teams/{team_id}/roster", {"rosterType": "active"})
     players = []
     try:
-        for entry in data["roster"]:
+        for i, entry in enumerate(data["roster"]):
             pos = entry.get("position", {}).get("abbreviation", "")
             if pos in ("P", "SP", "RP"):
                 continue
@@ -148,7 +148,7 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
                 bats = details["people"][0]["batSide"]["code"]
             except Exception:
                 bats = "R"
-            players.append((pid, person.get("fullName"), bats, pos))
+            players.append((pid, person.get("fullName"), bats, pos, min(len(players) + 1, 9)))
     except Exception:
         return ()
     return tuple(players[:13])
@@ -354,10 +354,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                 tinfo = demo.TEAMS.get(team)
                 if not tinfo:
                     continue
-                roster = [(None, n, b, p) for n, b, _t, p in tinfo["hitters"]]
+                roster = [(None, n, b, p, min(i + 1, 9))
+                          for i, (n, b, _t, p) in enumerate(tinfo["hitters"])]
             park = get_park(home)
             team_name = park["team_name"] if (park and team == home) else demo.TEAMS.get(team, {}).get("name", team)
-            for pid, name, bats, pos in roster:
+            for pid, name, bats, pos, spot in roster:
                 if not name:
                     continue
                 metrics, used_real = _hitter_metrics(
@@ -371,6 +372,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "team_name": demo.TEAMS.get(team, {}).get("name", team),
                     "bats": bats or "R",
                     "position": pos or "DH",
+                    "lineup_spot": spot,
                     "opponent": opp,
                     "home_team": home,
                     "is_home": side == "home",

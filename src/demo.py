@@ -506,7 +506,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
             ("home", home, away, away_pitcher),
         ):
             team_info = TEAMS[team]
-            for name, bats, tier, pos in team_info["hitters"]:
+            for idx, (name, bats, tier, pos) in enumerate(team_info["hitters"]):
                 prof = _hitter_profile(name, bats, tier, slate_seed)
                 row = {
                     "player": name,
@@ -514,6 +514,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "team_name": team_info["name"],
                     "bats": bats,
                     "position": pos,
+                    "lineup_spot": idx + 1 if idx < 9 else 9,
                     "opponent": opp,
                     "home_team": home,
                     "is_home": side == "home",

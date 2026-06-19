@@ -47,11 +47,29 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
    Match %** for today's bats (resemblance to recent HR hitters), and the
    **Top-5 list in each category**.
 6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
-   ULX formula): an **⚓ Anchor** (highest-confidence bat), **💰 Value** bats
-   (underpriced profiles), and **🚀 Deep-Space Longshots** (overlooked ceiling),
-   diversified across games & archetypes and graded on a 10-point checklist with a
-   🟢/🟡/🔴 light. Shows combined odds, model win %, and **EV**, plus a "build your
-   own" mode. Strategies: ULX role-based, Safest, Best-value (edge), Boom.
+   ULX formula): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
+   bats (underpriced profiles, 6-7), and **🚀 Deep-Space Longshots** (overlooked
+   ceiling, 7-9), diversified across games, archetypes **and lineup spots** and
+   graded on an 11-point checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
+   win %, and **EV**, plus a "build your own" mode. Strategies: ULX role-based,
+   Safest, Best-value (edge), Boom.
+7. **💎 Value Finder** — ranks the biggest **model-vs-book edges** (positive
+   **Edge%** = +EV), filterable by role / probability / live-only, with a one-click
+   value parlay.
+
+### Lineup spot (with a recurring HR-by-spot log)
+
+Every hitter carries a **lineup spot (1–9)** — live from the posted batting order
+when available, else estimated. It feeds the model three ways:
+- **Expected PA by spot** (top of order bats more, ~4.6 → 3.7 PA) folds directly
+  into the per-game HR probability.
+- **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
+  Longshots to 7-9, and checks "different lineup spots".
+- **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
+  hitter-day (date, player, spot, HR), de-duped, growing as the date advances.
+  The app appends to it on each run; `scripts/update_lineup_log.py` is a daily
+  updater (cron / CI / the `/loop` skill). Per-player "HRs from today's spot" and
+  the league HR-by-spot chart come from this log and nudge parlay selection.
 
 ### HR odds
 
@@ -295,6 +313,7 @@ modeled slates so the whole analysis runs without network.
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
 │   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
 │   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
+│   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
 │   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme

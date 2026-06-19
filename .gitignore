@@ -7,3 +7,4 @@ venv/
 .streamlit/secrets.toml
 *.csv.cache
 .pytest_cache/
+data/lineup_hr_log.csv

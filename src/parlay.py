@@ -30,6 +30,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .lineup import spot_role_fit
 from .odds import (
     american_to_decimal,
     american_to_prob,
@@ -77,12 +78,23 @@ def archetype(row: pd.Series) -> str:
 
 
 def role_fit(row: pd.Series, role: str) -> float:
-    """How good a player is *for a given role*."""
+    """How good a player is *for a given role*.
+
+    Blends the role's headline score with a lineup-spot bonus (Anchor wants 3-5,
+    Value 6-7, Longshot 7-9 — per the ULX playbook) and a recurring-history bonus
+    for bats that have actually homered from the spot they're hitting today.
+    """
+    spot = row.get("lineup_spot")
+    spot_bonus = spot_role_fit(spot, role)
+    # Recurring HR-by-spot signal: HR/game from this exact spot, scaled to ~0-8.
+    rate = row.get("spot_hr_rate")
+    hist_bonus = float(min(8.0, (rate or 0.0) * 40.0)) if pd.notna(rate) else 0.0
     if role == "Anchor":
-        return float(row.get("hr_score", 0))
+        return float(row.get("hr_score", 0)) + spot_bonus + hist_bonus
     if role == "Value":
-        return float(row.get("sneaky_score", 0)) + 0.5 * float(row.get("edge_pct", 0))
-    return float(row.get("longshot_score", 0))  # Longshot
+        return (float(row.get("sneaky_score", 0)) + 0.5 * float(row.get("edge_pct", 0))
+                + spot_bonus + hist_bonus)
+    return float(row.get("longshot_score", 0)) + spot_bonus + hist_bonus  # Longshot
 
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -205,21 +217,26 @@ def _summarize(legs: pd.DataFrame, n_legs: int) -> tuple[dict, list]:
     roles = set(legs["role"])
     archs = set(legs["archetype"])
     games = set(legs["game"])
+    spots = set(legs["lineup_spot"].dropna()) if "lineup_spot" in legs else set()
+    n = len(legs)
     checks = [
         ("Anchor identified", "Anchor" in roles),
-        ("Value bat found", "Value" in roles or len(legs) == 1),
-        ("Longshot selected", "Longshot" in roles or len(legs) < 3),
-        ("Different archetypes", len(archs) >= min(len(legs), 2)),
-        ("Different games (no stacking)", len(games) == len(legs)),
+        ("Value bat found", "Value" in roles or n == 1),
+        ("Longshot selected", "Longshot" in roles or n < 3),
+        ("Different archetypes", len(archs) >= min(n, 2)),
+        ("Different games (no stacking)", len(games) == n),
+        ("Different lineup spots", len(spots) >= min(n, 3) or len(spots) == n),
         ("Good matchups", legs["matchup_score"].mean() >= 52),
         ("Favorable HR environment", legs["env_score"].mean() >= 50),
         ("Reasonable odds (no crazy legs)", bool((legs["book_odds"] <= 2200).all())),
         ("Form / hard contact", legs.get("recent_form_score", pd.Series([50])).mean() >= 45
          or legs.get("hard_hit_score", pd.Series([50])).mean() >= 55),
-        ("Makes sense (live model prob)", model_prob >= (0.03 if len(legs) >= 4 else 0.06)),
+        ("Makes sense (live model prob)", model_prob >= (0.03 if n >= 4 else 0.06)),
     ]
     passed = sum(1 for _, ok in checks if ok)
+    total = len(checks)
+    ratio = passed / total
     summary["checks_passed"] = passed
-    summary["checks_total"] = len(checks)
-    summary["light"] = "🟢 GREEN" if passed >= 7 else ("🟡 YELLOW" if passed >= 5 else "🔴 RED")
+    summary["checks_total"] = total
+    summary["light"] = "🟢 GREEN" if ratio >= 0.7 else ("🟡 YELLOW" if ratio >= 0.5 else "🔴 RED")
     return summary, checks

@@ -26,6 +26,12 @@ from src.model import (
     RECENT_FORM_WEIGHTS,
     score_slate,
 )
+from src.lineup import (
+    attach_spot_signal,
+    league_spot_table,
+    player_spot_hr,
+    update_log_from_history,
+)
 from src.odds import attach_odds, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
 from src.sources import get_slate
@@ -57,7 +63,12 @@ def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_d
     centroid = hr_profile_centroid(events, end_date_iso=end_iso, half_life_days=half_life_days)
     calib = calibration_table(slate_hist)
     trend = recent_trend(events, end_iso, recent_days=7)
-    return events, summary, centroid, calib, trend, source, notes
+    # Lineup-spot HR data: grow the recurring log, then aggregate by spot.
+    update_log_from_history(slate_hist)
+    player_spot = player_spot_hr(slate_hist)
+    league_spot = league_spot_table(slate_hist)
+    return (events, summary, centroid, calib, trend, player_spot, league_spot,
+            source, notes)
 
 
 # --------------------------------------------------------------------------- #
@@ -98,6 +109,10 @@ GLOSSARY = {
     "Max EV": "Top-end exit velocity (mph) — a raw-power ceiling indicator.",
     "xwOBA": "Expected weighted on-base average from quality of contact.",
     "Park Factor": "Handedness-aware HR park factor (100 = average; 110 = +10% HR).",
+    "Spot": "Batting-order spot (1-9) for this game — live from the posted lineup when available, else estimated. Top-of-order bats get more PAs.",
+    "xPA": "Expected plate appearances given the lineup spot (top of order bats more) — feeds the game HR probability.",
+    "HRs@Spot": "HRs this hitter has hit from today's lineup spot in the recurring HR-by-spot log (data before the selected date).",
+    "HR/G@Spot": "HR per game this hitter has produced from today's lineup spot (recurring log) — a parlay role-fit nudge.",
     "Profile Match": "How closely a hitter resembles the trailing-month HR-hitter profile (barrel%, EV, max EV, launch angle, park) — 100 = a dead-ringer for recent HR hitters.",
     "Calibrated": "HR Score nudged by recent-HR Profile Match (85% HR Score + 15% Profile Match).",
 }
@@ -219,6 +234,7 @@ DISPLAY_COLUMNS = {
     "pitcher_throws": "P-Hand",
     "bats": "Bats",
     "position": "Pos",
+    "lineup_spot": "Spot",
     "hr_score": "HR Score",
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
@@ -255,6 +271,9 @@ DISPLAY_COLUMNS = {
     "vs_br": "vs BR",
     "vs_os": "vs OS",
     "hr_per_pa": "HR/PA",
+    "expected_pa": "xPA",
+    "spot_hr_at_current": "HRs@Spot",
+    "spot_hr_rate": "HR/G@Spot",
     "park_factor": "Park Factor",
     "wind_mult": "Wind x",
     "temp_f": "Temp °F",
@@ -316,6 +335,10 @@ COLUMN_CONFIG = {
     "xSLG": st.column_config.NumberColumn("xSLG", help=GLOSSARY["xSLG"], format="%.3f"),
     "HR/PA": st.column_config.NumberColumn("HR/PA", format="%.3f"),
     "Park Factor": st.column_config.NumberColumn("Park Factor", help=GLOSSARY["Park Factor"], format="%.0f"),
+    "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
+    "xPA": st.column_config.NumberColumn("xPA", help=GLOSSARY["xPA"], format="%.1f"),
+    "HRs@Spot": st.column_config.NumberColumn("HRs@Spot", help=GLOSSARY["HRs@Spot"], format="%d"),
+    "HR/G@Spot": st.column_config.NumberColumn("HR/G@Spot", help=GLOSSARY["HR/G@Spot"], format="%.2f"),
     "Recent Form": st.column_config.ProgressColumn(
         "Recent Form", min_value=0, max_value=100, format="%.0f"
     ),
@@ -487,7 +510,7 @@ def _top5_card_grid(tops: dict):
 
 
 def tab_trends(history, projection_slate):
-    (events, summary, centroid, calib, trend, source, notes,
+    (events, summary, centroid, calib, trend, league_spot, source, notes,
      start_iso, end_iso, half_life) = history
     st.subheader("📈 HR Trends & Backtest")
     badge = "🟢" if source.startswith("LIVE") else "🟡"
@@ -547,6 +570,23 @@ def tab_trends(history, projection_slate):
                 use_container_width=True,
             )
 
+    if league_spot is not None and not league_spot.empty:
+        st.markdown("##### 🔢 HRs by lineup spot (recurring log)")
+        st.caption(
+            "Home runs by batting-order spot from the accumulating HR log "
+            "(before the selected date). Middle-order spots produce the most HRs — "
+            "the parlay builder reads this to fit Anchors (3-5), Value (6-7) and "
+            "Longshots (7-9), and folds expected PA-by-spot into the HR probability."
+        )
+        ls = league_spot.sort_values("lineup_spot")
+        st.altair_chart(
+            alt.Chart(ls).mark_bar(color="#e63946").encode(
+                x=alt.X("lineup_spot:O", title="Lineup spot"),
+                y=alt.Y("hr:Q", title="HRs"),
+                tooltip=["lineup_spot", "hr", "games", alt.Tooltip("hr_per_game:Q", format=".3f")]),
+            use_container_width=True,
+        )
+
     if calib is not None and not calib.empty:
         st.markdown("##### 🎯 Model calibration — predicted vs. actual HR rate")
         st.caption(
@@ -603,7 +643,9 @@ def _render_parlay(result, stake):
                 m1, m2 = st.columns(2)
                 m1.metric("HR Prob", f"{leg['hr_prob_game']*100:.0f}%")
                 m2.metric("Edge", f"{leg['edge_pct']:+.1f}%")
-                st.caption(f"_{leg['archetype']}_ · {leg.get('rationale','')}")
+                spot = leg.get("lineup_spot")
+                spot_txt = f"bats {int(spot)}" if pd.notna(spot) else ""
+                st.caption(f"_{leg['archetype']}_ · {spot_txt} · {leg.get('rationale','')}")
 
     # Combined ticket.
     st.markdown("### 🎟️ The Ticket")
@@ -673,6 +715,49 @@ def tab_parlay(df):
             _render_parlay(summarize_selection(df, choices), stake)
 
 
+def tab_value_finder(df):
+    st.subheader("💎 Value Finder")
+    st.caption(
+        "The biggest **model-vs-book edges** — where the model's HR% beats the "
+        "book's implied HR%. Positive **Edge%** = +EV. *With model-implied odds "
+        "everyone sits near −hold; flip on live odds (sidebar) to surface real "
+        "value.* Research/entertainment only."
+    )
+
+    c1, c2, c3 = st.columns(3)
+    min_prob = c1.slider("Min HR probability %", 0, 30, 6) / 100.0
+    role_filter = c2.multiselect("Role", ["Anchor", "Value", "Longshot"], default=[])
+    live_only = c3.checkbox("Live odds only", value=False)
+
+    from src.parlay import assign_role
+    v = df.copy()
+    v["role"] = v["hr_prob_game"].map(assign_role)
+    v = v[v["hr_prob_game"] >= min_prob]
+    if role_filter:
+        v = v[v["role"].isin(role_filter)]
+    if live_only:
+        v = v[v.get("odds_is_live", False)]
+    if v.empty:
+        st.warning("No bats match these filters.")
+        return
+
+    v = v.sort_values("edge_pct", ascending=False)
+    any_live = bool(v.get("odds_is_live", pd.Series([False])).any())
+    pos = int((v["edge_pct"] > 0).sum())
+    st.markdown(f"**{len(v)}** bats · **{pos}** with positive edge · "
+                f"odds: {'🟢 LIVE' if any_live else '🟡 model-implied'}")
+
+    cols = ["player", "team", "opponent", "pitcher_name", "role", "lineup_spot",
+            "book_odds", "fair_odds", "hr_prob_game", "implied_prob", "edge_pct",
+            "spot_hr_at_current", "rationale"]
+    render_table(v.head(40), cols, "Edge%", "value_finder")
+
+    st.markdown("##### 🎰 One-click value parlay")
+    n = st.slider("Legs", 1, 5, 3, key="vf_legs")
+    res = generate_parlay(v, n_legs=n, strategy="value")
+    _render_parlay(res, 10.0)
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
@@ -706,13 +791,13 @@ def main():
     # "resemblance to recent HR hitters" signal used by the Trends tab.
     start_iso = (game_date - dt.timedelta(days=lookback)).isoformat()
     end_iso = game_date.isoformat()
-    events, summary, centroid, calib, trend, h_source, h_notes = load_hr_history(
-        start_iso, end_iso, prefer_live, float(half_life)
-    )
+    (events, summary, centroid, calib, trend, player_spot, league_spot,
+     h_source, h_notes) = load_hr_history(start_iso, end_iso, prefer_live, float(half_life))
     scored = add_profile_similarity(scored, centroid)
+    scored = attach_spot_signal(scored, player_spot)
     scored = attach_odds(scored, end_iso, use_live=live_odds)
-    history = (events, summary, centroid, calib, trend, h_source, h_notes,
-               start_iso, end_iso, half_life)
+    history = (events, summary, centroid, calib, trend, league_spot, h_source,
+               h_notes, start_iso, end_iso, half_life)
 
     filtered = filter_controls(scored)
     if filtered.empty:
@@ -723,10 +808,10 @@ def main():
     st.markdown(f"**{len(filtered)}** hitters · **{filtered['game'].nunique()}** games · "
                 f"HR odds: {odds_badge}")
 
-    t1, t2, t3, t4, t5, t6 = st.tabs(
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
          "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
-         "📈 HR Trends & Backtest", "🎰 Parlay Builder"]
+         "📈 HR Trends & Backtest", "🎰 Parlay Builder", "💎 Value Finder"]
     )
     with t1:
         tab_longshots(filtered)
@@ -740,6 +825,8 @@ def main():
         tab_trends(history, filtered)
     with t6:
         tab_parlay(filtered)
+    with t7:
+        tab_value_finder(filtered)
 
 
 if __name__ == "__main__":

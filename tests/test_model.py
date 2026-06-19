@@ -196,8 +196,36 @@ def test_odds_and_parlay_generator():
         assert legs["game"].nunique() == n
         s = res["summary"]
         assert s["combined_decimal"] >= 1.0 and 0 <= s["model_prob"] <= 100
-        assert s["checks_total"] == 10
+        assert s["checks_total"] == 11
 
     # Custom selection grades too.
     cust = summarize_selection(df, list(df["player"].head(3)))
     assert cust["summary"]["n_legs"] == 3
+
+
+def test_lineup_spot_and_recurring_log(tmp_path, monkeypatch):
+    from src import lineup
+    from src.history import build_hr_history
+    from src.lineup import (attach_spot_signal, expected_pa, league_spot_table,
+                            player_spot_hr, spot_role_fit, update_log_from_history)
+
+    # Expected PA monotonically falls down the order; spot role fit matches ULX.
+    assert expected_pa(1) > expected_pa(5) > expected_pa(9)
+    assert spot_role_fit(4, "Anchor") > spot_role_fit(8, "Anchor")
+    assert spot_role_fit(9, "Longshot") > spot_role_fit(3, "Longshot")
+
+    df = _slate()
+    assert df["lineup_spot"].between(1, 9).all()
+    assert df["expected_pa"].between(3.7, 4.6).all()
+
+    # Recurring log writes to an isolated path and accumulates (idempotent).
+    monkeypatch.setattr(lineup, "_LOG_PATH", str(tmp_path / "log.csv"))
+    _e, slate_hist, _s, _n = build_hr_history("2026-06-01", "2026-06-08", prefer_live=False)
+    n1 = update_log_from_history(slate_hist)
+    n2 = update_log_from_history(slate_hist)   # de-duped -> no growth
+    assert n1 > 0 and n2 == 0
+    ls = league_spot_table(slate_hist)
+    assert not ls.empty and ls["hr"].sum() > 0
+    ps = player_spot_hr(slate_hist)
+    enriched = attach_spot_signal(df, ps)
+    assert "spot_hr_at_current" in enriched.columns

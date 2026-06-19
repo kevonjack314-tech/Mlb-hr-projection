@@ -340,7 +340,10 @@ def score_row(row: pd.Series) -> dict:
     # P_CEIL so elite bats keep their ordering (no bunching at the cap) and the
     # implied odds stay in a realistic HR-prop range (top spots ~ +280..+360).
     p_adj = float(max(0.002, P_HR_CEIL * (1.0 - np.exp(-raw_rate / P_HR_CEIL))))
-    pa = DEFAULT_PA
+    # Expected PA depends on the batting-order spot (top of order bats more).
+    from .lineup import expected_pa
+    pa = expected_pa(row.get("lineup_spot"))
+    out["expected_pa"] = round(pa, 2)
     p_game = 1.0 - (1.0 - p_adj) ** pa
     out["hr_prob_pa"] = round(p_adj, 4)
     out["hr_prob_game"] = round(p_game, 4)
