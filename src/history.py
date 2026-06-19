@@ -43,7 +43,7 @@ from .parks import get_park, park_hr_multiplier
 # Metrics that define the "HR hitter profile" used for similarity matching.
 # GB% and LD% are intentionally left out of the centroid (collinear with FB%)
 # but still appear in the shared-profile lift table below.
-PROFILE_METRICS = ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
+PROFILE_METRICS = ["barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
                    "launch_angle", "whiff_pct", "fb_pct", "pull_pct",
                    "hr_fb", "xiso", "park_factor"]
 
@@ -143,10 +143,11 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 if isinstance(srow, pd.DataFrame):
                     srow = srow.iloc[0]
                 prof = {m: srow.get(m) for m in
-                        ["barrel_pct", "hard_hit_pct", "avg_ev", "max_ev",
+                        ["barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
                          "launch_angle", "whiff_pct", "chase_pct",
                          "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
-                         "pull_pct", "hr_fb", "xiso", "xslg", "xwoba", "hr_per_pa"]}
+                         "pull_pct", "hr_fb", "xiso", "xslg", "sprint_speed",
+                         "xwoba", "hr_per_pa"]}
             rows.append({
                 "date": str(r.get("game_date")),
                 "player": r.get("player_name"),
@@ -188,7 +189,8 @@ def summarize_hr_profile(events: pd.DataFrame, slate: pd.DataFrame) -> dict:
 
     metric_rows = []
     for m, label in [
-        ("barrel_pct", "Barrel%"), ("hard_hit_pct", "Hard-Hit%"),
+        ("barrel_pct", "Barrel%"), ("brl_pa", "Barrel/PA%"),
+        ("hard_hit_pct", "Hard-Hit%"),
         ("avg_ev", "Avg EV"), ("max_ev", "Max EV"),
         ("launch_angle", "Launch Angle"), ("whiff_pct", "Whiff%"),
         ("fb_pct", "Fly-Ball%"), ("gb_pct", "Ground-Ball%"),

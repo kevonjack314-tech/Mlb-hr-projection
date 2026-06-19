@@ -106,6 +106,7 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
             "max_hit_speed": "max_ev",
             "ev95percent": "hard_hit_pct",
             "brl_percent": "barrel_pct",
+            "brl_pa": "brl_pa",
             "avg_hit_angle": "launch_angle",
             "player_id": "mlbam_id",
         }
@@ -114,7 +115,7 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
                        + " " + ev.get("last_name", "").astype(str).str.strip())
     ev["name_key"] = ev["name_full"].map(normalize_name)
 
-    keep = ["name_key", "mlbam_id", "barrel_pct", "hard_hit_pct",
+    keep = ["name_key", "mlbam_id", "barrel_pct", "brl_pa", "hard_hit_pct",
             "avg_ev", "max_ev", "launch_angle"]
     keep = [c for c in keep if c in ev.columns]
     table = ev[keep].copy()
@@ -152,8 +153,17 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     except Exception:
         pass
 
+    # Merge Statcast sprint speed (ft/s) by MLBAM id — athletic context.
+    try:
+        sp = pyb.statcast_sprint_speed(year, 10)
+        sp = sp.rename(columns={"player_id": "mlbam_id"})
+        if "sprint_speed" in sp.columns:
+            table = table.merge(sp[["mlbam_id", "sprint_speed"]], on="mlbam_id", how="left")
+    except Exception:
+        pass
+
     # Derive / clean fields.
-    for col in ("xiso", "xslg"):
+    for col in ("xiso", "xslg", "brl_pa", "sprint_speed"):
         if col not in table:
             table[col] = np.nan
     if "pa" not in table:
@@ -292,6 +302,7 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "fb_pct": g("fb_pct"), "gb_pct": g("gb_pct"), "ld_pct": g("ld_pct"),
         "pull_pct": g("pull_pct"), "hr_fb": g("hr_fb"),
         "xiso": g("xiso"), "xslg": g("xslg"),
+        "brl_pa": g("brl_pa"), "sprint_speed": g("sprint_speed"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }

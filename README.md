@@ -71,6 +71,9 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | **Chase%** (O-Swing%), **Zone-Contact%** (Z-Contact%), **Fly-Ball%** (FB%) | **FanGraphs** discipline + batted-ball via `pybaseball` | Modeled profiles |
 | **Ground-Ball%**, **Line-Drive%**, **Pull%**, **HR/FB** | **FanGraphs** batted-ball via `pybaseball` | Modeled profiles |
 | **xISO** (= xSLG − xBA) & **xSLG** (Statcast expected power) | **Baseball Savant** expected stats via `pybaseball` | Modeled profiles |
+| **Barrel/PA%** (barrels per plate appearance) | **Baseball Savant** exit-velo/barrels via `pybaseball` | Modeled profiles |
+| **Sprint speed** (ft/s, athletic context) | **Baseball Savant** sprint-speed via `pybaseball` | Modeled profiles |
+| **vs-pitch-type** (vs FB / breaking / offspeed) + pitcher mix | Modeled (hook for Statcast run value by pitch type) | Modeled |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -132,6 +135,18 @@ the single best public predictor of home-run output.
 
 **Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.50**,
 15-day **0.30**, 30-day **0.20** — the hottest, most recent signal counts most.
+
+**Expected HR & regression.** A season **xHR** is computed from batted-ball quality
+(Barrels/PA, with a fly-ball term) × PA. The **HR − xHR** gap flags over- and
+under-performers; a negative gap (fewer HR than the contact deserves) is a
+positive-regression "due" signal that feeds the **Sneaky** score. *Sprint speed is
+shown as athletic context only — it has no measurable effect on HR power, so xHR is
+deliberately **not** sprint-adjusted.*
+
+**Pitch-type matchup.** The hitter's performance vs fastballs / breaking / offspeed
+is weighted by the probable pitcher's **pitch mix** into a pitch-arsenal edge that
+folds into the matchup multiplier and score (currently modeled; the real version
+pulls per-batter run value by pitch type from Statcast).
 
 ### 2. **HR probability** (≥1 HR in the game)
 
@@ -221,9 +236,10 @@ modeled slates so the whole analysis runs without network.
   0.15·AvgEV + 0.15·xwOBA`, where **ContactFloor = 0.6·(100 − swing-and-miss) +
   0.4·Zone-Contact%** (in-zone contact is the cleanest repeatable-contact signal),
   scaled by a sample-size confidence factor.
-- **Sneaky** = `0.30·Matchup + 0.25·Env + 0.25·FormGap + 0.20·UnderRadar`, where
-  *FormGap* rewards bats heating up beyond their season line and *UnderRadar*
-  favors lower-profile hitters who still have real batted-ball pop.
+- **Sneaky** = `0.26·Matchup + 0.22·Env + 0.22·FormGap + 0.16·UnderRadar +
+  0.14·Regression`, where *FormGap* rewards bats heating up beyond their season
+  line, *UnderRadar* favors lower-profile hitters with real batted-ball pop, and
+  *Regression* rewards hitters sitting **below their xHR** (due to bounce back).
 
 ---
 

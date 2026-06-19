@@ -111,3 +111,20 @@ def test_expected_power_and_recency_trend():
     # Trend table is non-empty and ranks by movement.
     tr = recent_trend(events, "2026-06-18", recent_days=7)
     assert not tr.empty and "Trend" in tr.columns
+
+
+def test_barrel_pa_xhr_and_pitch_matchup():
+    df = _slate()
+    # Barrel/PA, sprint speed, vs-pitch-type splits present and sane.
+    assert df["brl_pa"].between(1.5, 13).all()
+    assert df["sprint_speed"].between(22, 31).all()
+    for c in ("vs_fb", "vs_br", "vs_os"):
+        assert df[c].between(0.2, 0.45).all()
+    # Expected HR + regression gap.
+    assert "xhr_season" in df.columns
+    assert df["pitch_matchup_score"].between(0, 100).all()
+    assert df["regression_score"].between(0, 100).all()
+    # Under-xHR hitters should exist and skew the sneaky regression up.
+    under = df[df["hr_minus_xhr"] <= -2.0]
+    assert len(under) > 0
+    assert under["regression_score"].mean() > df["regression_score"].mean()

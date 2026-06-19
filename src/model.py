@@ -54,6 +54,8 @@ REF = {
     "hr_fb": (6.0, 22.0),
     "xiso": (0.090, 0.280),
     "xslg": (0.330, 0.560),
+    "brl_pa": (2.0, 12.0),
+    "vs_pitch_woba": (0.290, 0.400),
 }
 
 # League-average fly-ball rate (FanGraphs batted-ball FB%); fly balls are the
@@ -187,6 +189,51 @@ def _recent_form_rate(row: pd.Series) -> float:
     return sum(row.get(k, 0.0) * w for k, w in RECENT_FORM_WEIGHTS.items())
 
 
+def expected_hr(row: pd.Series) -> tuple[float, float, float]:
+    """Season expected HR from batted-ball quality. Returns (xhr/PA, xHR, HR-xHR).
+
+    Barrels per PA (brl_pa) is the cleanest input — roughly ~62% of barrels leave
+    the yard — with a small contact baseline; we fall back to barrel% when brl_pa
+    is unavailable. The HR - xHR gap flags over/under-performers (regression).
+    Note: sprint speed is *not* used — it has no measurable effect on HR power, so
+    xHR is deliberately not "sprint-adjusted"; sprint speed is shown as context.
+    """
+    pa = row.get("pa")
+    brl_pa = row.get("brl_pa")
+    barrel = row.get("barrel_pct")
+    fb = row.get("fb_pct")
+    if brl_pa is not None:
+        xhr_per_pa = (brl_pa / 100.0) * 0.62 + 0.004
+    elif barrel is not None:
+        xhr_per_pa = 0.0034 * barrel + (0.0002 * (fb - 35.0) if fb is not None else 0.0)
+    else:
+        return (LEAGUE_HR_PER_PA, float("nan"), float("nan"))
+    xhr_per_pa = float(np.clip(xhr_per_pa, 0.004, 0.095))
+    if pa is None or (isinstance(pa, float) and np.isnan(pa)):
+        return (xhr_per_pa, float("nan"), float("nan"))
+    xhr_season = xhr_per_pa * pa
+    hr_minus_xhr = (row.get("season_hr", xhr_season) or xhr_season) - xhr_season
+    return (xhr_per_pa, xhr_season, hr_minus_xhr)
+
+
+def pitch_type_matchup(row: pd.Series) -> tuple[float, float]:
+    """Pitch-mix-weighted hitter performance vs the probable pitcher's arsenal.
+
+    Combines the hitter's wOBA-like marks vs fastballs / breaking / offspeed with
+    the pitcher's pitch mix. Returns (multiplier, 0-100 score). Modeled today; the
+    real version would pull per-batter run value by pitch type from Statcast.
+    """
+    vs = (row.get("vs_fb"), row.get("vs_br"), row.get("vs_os"))
+    mix = (row.get("pitcher_mix_fb"), row.get("pitcher_mix_br"), row.get("pitcher_mix_os"))
+    if any(v is None for v in vs) or any(m is None for m in mix):
+        return 1.0, 50.0
+    total = sum(mix) or 1.0
+    woba = sum(m * v for m, v in zip(mix, vs)) / total
+    score = scale(woba, *REF["vs_pitch_woba"])
+    mult = float(np.clip(0.92 + (woba - 0.320) / 0.080 * 0.10, 0.90, 1.10))
+    return mult, score
+
+
 def score_row(row: pd.Series) -> dict:
     """Score a single hitter-vs-game row. Returns a dict of derived fields."""
     out: dict = {}
@@ -228,8 +275,17 @@ def score_row(row: pd.Series) -> dict:
     hr_fb_mult = (float(np.clip(1.0 + (hr_fb - LEAGUE_HR_FB) / LEAGUE_HR_FB * 0.35, 0.88, 1.15))
                   if hr_fb is not None else 1.0)
 
+    brl_pa_score = scale(row.get("brl_pa"), *REF["brl_pa"])
+
+    # Pitcher matchup, then fold in the pitch-type (arsenal) edge.
     matchup_mult, matchup_score = matchup_multiplier(row)
+    pitch_mult, pitch_score = pitch_type_matchup(row)
+    matchup_mult *= pitch_mult
+    matchup_score = 0.75 * matchup_score + 0.25 * pitch_score
     env = environment_components(row)
+
+    # Expected HR (season) and the over/under-performance gap (regression signal).
+    xhr_per_pa, xhr_season, hr_minus_xhr = expected_hr(row)
 
     out.update(env)
     out["power_quality_score"] = round(power_quality, 1)
@@ -237,6 +293,10 @@ def score_row(row: pd.Series) -> dict:
     out["recent_form_score"] = round(recent_form_score, 1)
     out["matchup_mult"] = round(matchup_mult, 3)
     out["matchup_score"] = round(matchup_score, 1)
+    out["pitch_matchup_score"] = round(pitch_score, 1)
+    out["brl_pa_score"] = round(brl_pa_score, 1)
+    out["xhr_season"] = round(xhr_season, 1) if xhr_season == xhr_season else None
+    out["hr_minus_xhr"] = round(hr_minus_xhr, 1) if hr_minus_xhr == hr_minus_xhr else None
     out["barrel_score"] = round(pq["_pq_subs"]["barrel_pct"], 1)
     out["max_ev_score"] = round(pq["_pq_subs"]["max_ev"], 1)
     out["hard_hit_score"] = round(pq["_pq_subs"]["hard_hit_pct"], 1)
@@ -322,13 +382,19 @@ def score_row(row: pd.Series) -> dict:
     form_gap_score = scale(form_gap, -0.02, 0.04)
     # Under-radar: lower season HR profile but still real batted-ball pop.
     under_radar = (100.0 - season_hr_score) * (power_quality / 100.0)
+    # Regression: hitting FEWER HR than expected (negative gap) = positive-
+    # regression candidate, a classic sneaky play. Neutral when xHR is unknown.
+    regression_score = (scale(-hr_minus_xhr, -4.0, 8.0)
+                        if hr_minus_xhr == hr_minus_xhr else 50.0)
     sneaky = (
-        0.30 * matchup_score
-        + 0.25 * env["env_score"]
-        + 0.25 * form_gap_score
-        + 0.20 * under_radar
+        0.26 * matchup_score
+        + 0.22 * env["env_score"]
+        + 0.22 * form_gap_score
+        + 0.16 * under_radar
+        + 0.14 * regression_score
     )
     out["sneaky_score"] = round(sneaky, 1)
+    out["regression_score"] = round(regression_score, 1)
     out["form_gap"] = round(form_gap, 4)
 
     out["rationale"] = _build_rationale(row, out)
@@ -384,6 +450,10 @@ def _build_sneaky_reasons(row: pd.Series, out: dict) -> str:
         reasons.append("tailwind carry")
     if out["platoon_adv"] and out["power_quality_score"] >= 55:
         reasons.append("quiet platoon power edge")
+    if out.get("hr_minus_xhr") is not None and out["hr_minus_xhr"] <= -2.0:
+        reasons.append(f"under xHR by {abs(out['hr_minus_xhr']):.0f} (due to regress up)")
+    if out.get("pitch_matchup_score", 50) >= 65:
+        reasons.append("strong vs this arm's pitch mix")
     if not reasons and out["sneaky_score"] >= 55:
         reasons.append("favorable matchup/park combo")
     return "; ".join(reasons[:3]).capitalize() if reasons else ""

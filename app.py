@@ -64,12 +64,20 @@ def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_d
 GLOSSARY = {
     "HR Score": "Composite 0-100 rating blending batted-ball quality, season & recent HR rate, matchup, and park/weather.",
     "HR Prob (game)": "Modeled probability the hitter hits ≥1 HR in this game (per-PA rate compounded over ~4.1 PA).",
-    "xHR": "Expected home runs in the game = per-PA HR rate × expected PA.",
+    "xHR (game)": "Expected home runs in THIS game = per-PA HR rate × expected PA.",
     "Fair Odds": "Vig-free American odds implied by the game HR probability (handy for spotting +EV props).",
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
     "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
+    "Barrel/PA%": "Barrels per plate appearance (real, Statcast) — barrel rate scaled by how often the bat puts a ball in play; an elite season-long HR signal.",
+    "xHR (season)": "Season expected home runs from batted-ball quality (barrels/PA + fly-ball rate). The gap vs actual HR flags luck/regression.",
+    "HR−xHR": "Actual HR minus expected HR. Negative = under-performing the quality of contact (a positive-regression / 'due' candidate, used in the Sneaky score).",
+    "Sprint": "Sprint speed in ft/s (real, Statcast) — athletic context. Shown for color; it has no measurable effect on HR power, so xHR is NOT sprint-adjusted.",
+    "Pitch Matchup": "Pitch-mix-weighted hitter performance vs the probable pitcher's arsenal (vs fastball/breaking/offspeed × the pitcher's usage). Higher = a better arsenal matchup.",
+    "vs FB": "Hitter's wOBA-like performance vs fastballs (modeled; real version pulls Statcast run value by pitch type).",
+    "vs BR": "Hitter's wOBA-like performance vs breaking balls (modeled).",
+    "vs OS": "Hitter's wOBA-like performance vs offspeed pitches (modeled).",
     "Hard-Hit%": "Share of batted balls ≥95 mph exit velocity.",
     "Whiff%": "Swing-and-miss rate = swings that miss / total swings (real, from FanGraphs Contact%). High whiff = more boom-or-bust, lower contact floor.",
     "Contact%": "Contact rate = contact made / swings (real, from FanGraphs); the complement of Whiff%. High contact = better bat-to-ball skill / higher floor.",
@@ -206,12 +214,13 @@ DISPLAY_COLUMNS = {
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
     "hr_prob_game": "HR Prob (game)",
-    "xhr": "xHR",
+    "xhr": "xHR (game)",
     "fair_odds": "Fair Odds",
     "longshot_score": "Longshot",
     "consistency_score": "Consistency",
     "sneaky_score": "Sneaky",
     "barrel_pct": "Barrel%",
+    "brl_pa": "Barrel/PA%",
     "hard_hit_pct": "Hard-Hit%",
     "whiff_pct": "Whiff%",
     "contact_pct": "Contact%",
@@ -227,6 +236,13 @@ DISPLAY_COLUMNS = {
     "xwoba": "xwOBA",
     "xiso": "xISO",
     "xslg": "xSLG",
+    "xhr_season": "xHR (season)",
+    "hr_minus_xhr": "HR−xHR",
+    "sprint_speed": "Sprint",
+    "pitch_matchup_score": "Pitch Matchup",
+    "vs_fb": "vs FB",
+    "vs_br": "vs BR",
+    "vs_os": "vs OS",
     "hr_per_pa": "HR/PA",
     "park_factor": "Park Factor",
     "wind_mult": "Wind x",
@@ -250,7 +266,14 @@ COLUMN_CONFIG = {
     "HR Prob (game)": st.column_config.NumberColumn(
         "HR Prob (game)", help=GLOSSARY["HR Prob (game)"], format="%.1f%%"
     ),
-    "xHR": st.column_config.NumberColumn("xHR", help=GLOSSARY["xHR"], format="%.2f"),
+    "xHR (game)": st.column_config.NumberColumn("xHR (game)", help=GLOSSARY["xHR (game)"], format="%.2f"),
+    "xHR (season)": st.column_config.NumberColumn("xHR (season)", help=GLOSSARY["xHR (season)"], format="%.1f"),
+    "HR−xHR": st.column_config.NumberColumn("HR−xHR", help=GLOSSARY["HR−xHR"], format="%+.1f"),
+    "Sprint": st.column_config.NumberColumn("Sprint", help=GLOSSARY["Sprint"], format="%.1f"),
+    "Pitch Matchup": st.column_config.ProgressColumn("Pitch Matchup", help=GLOSSARY["Pitch Matchup"], min_value=0, max_value=100, format="%.0f"),
+    "vs FB": st.column_config.NumberColumn("vs FB", help=GLOSSARY["vs FB"], format="%.3f"),
+    "vs BR": st.column_config.NumberColumn("vs BR", help=GLOSSARY["vs BR"], format="%.3f"),
+    "vs OS": st.column_config.NumberColumn("vs OS", help=GLOSSARY["vs OS"], format="%.3f"),
     "Fair Odds": st.column_config.NumberColumn("Fair Odds", help=GLOSSARY["Fair Odds"], format="%+d"),
     "Longshot": st.column_config.ProgressColumn(
         "Longshot", help=GLOSSARY["Longshot"], min_value=0, max_value=100, format="%.1f"
@@ -262,6 +285,7 @@ COLUMN_CONFIG = {
         "Sneaky", help=GLOSSARY["Sneaky"], min_value=0, max_value=100, format="%.1f"
     ),
     "Barrel%": st.column_config.NumberColumn("Barrel%", help=GLOSSARY["Barrel%"], format="%.1f"),
+    "Barrel/PA%": st.column_config.NumberColumn("Barrel/PA%", help=GLOSSARY["Barrel/PA%"], format="%.1f"),
     "Hard-Hit%": st.column_config.NumberColumn("Hard-Hit%", help=GLOSSARY["Hard-Hit%"], format="%.1f"),
     "Whiff%": st.column_config.NumberColumn("Whiff%", help=GLOSSARY["Whiff%"], format="%.1f"),
     "Contact%": st.column_config.NumberColumn("Contact%", help=GLOSSARY["Contact%"], format="%.1f"),
@@ -359,7 +383,7 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
-            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "fb_pct",
+            "hr_prob_game", "fair_odds", "max_ev", "barrel_pct", "brl_pa", "fb_pct",
             "hr_fb", "pull_pct", "whiff_pct", "chase_pct", "park_factor",
             "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
@@ -376,7 +400,7 @@ def tab_consistent(df: pd.DataFrame):
     st.markdown("##### Top 20 by Consistency Score")
     metric_bar_chart(df, "consistency_score", "Consistency Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "consistency_score",
-            "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "avg_ev",
+            "hr_score", "hr_prob_game", "hard_hit_pct", "barrel_pct", "brl_pa", "avg_ev",
             "contact_pct", "zone_contact_pct", "xwoba", "xiso", "hr_per_pa", "rationale"]
     render_table(df.sort_values("consistency_score", ascending=False).head(40),
                  cols, "Consistency", "consistent")
@@ -393,8 +417,8 @@ def tab_sneaky(df: pd.DataFrame):
     leaderboard_cards(sneaky, "sneaky_score", "Sneaky", n=6)
     st.markdown("##### Why they're sneaky")
     cols = ["player", "team", "opponent", "pitcher_name", "sneaky_score",
-            "hr_prob_game", "form_gap", "park_factor", "wind_mult",
-            "barrel_pct", "sneaky_reasons"]
+            "hr_prob_game", "form_gap", "hr_minus_xhr", "pitch_matchup_score",
+            "park_factor", "wind_mult", "barrel_pct", "sneaky_reasons"]
     render_table(sneaky.sort_values("sneaky_score", ascending=False).head(40),
                  cols, "Sneaky", "sneaky")
 

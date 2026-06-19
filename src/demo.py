@@ -379,6 +379,16 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     xiso = max(0.070, min(0.300, xiso))
     xba_est = max(0.210, min(0.300, 0.250 + rng.uniform(-0.03, 0.03)))
     xslg = round(xba_est + xiso, 3)
+    # Barrels per plate appearance (%): barrel rate scaled by how often the bat
+    # puts a ball in play (BBE/PA ~ 0.6). A premier season-long HR predictor.
+    brl_pa = round(max(1.5, min(13.0, barrel * rng.uniform(0.55, 0.68))), 1)
+    # Sprint speed (ft/s) — athletic context (not a HR driver; shown for color).
+    sprint_speed = round(max(23.0, min(30.5, rng.gauss(27.0, 1.3))), 1)
+    # Performance vs pitch families (wOBA-like). Most hitters handle fastballs
+    # best; breaking/offspeed separate the disciplined from the exploitable.
+    vs_fb = round(max(0.250, min(0.440, xwoba + rng.uniform(-0.010, 0.055))), 3)
+    vs_br = round(max(0.225, min(0.420, xwoba + rng.uniform(-0.060, 0.020))), 3)
+    vs_os = round(max(0.225, min(0.420, xwoba + rng.uniform(-0.050, 0.030))), 3)
 
     # Season HR/PA anchored to tier; PA accrued over the season.
     pa = rng.randint(180, 480)
@@ -413,6 +423,11 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "hr_fb": round(hr_fb, 1),
         "xiso": round(xiso, 3),
         "xslg": xslg,
+        "brl_pa": brl_pa,
+        "sprint_speed": sprint_speed,
+        "vs_fb": vs_fb,
+        "vs_br": vs_br,
+        "vs_os": vs_os,
         "pa": pa,
         "season_hr": season_hr,
         "hr_per_pa": round(hr_per_pa, 4),
@@ -436,6 +451,10 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     barrel_allowed = {1: 11.0, 2: 9.5, 3: 8.0, 4: 6.8, 5: 5.5}[tier] + rng.uniform(-1, 1)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
+    # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
+    pmix_fb = rng.randint(44, 64)
+    pmix_br = min(rng.randint(20, 38), 95 - pmix_fb)
+    pmix_os = 100 - pmix_fb - pmix_br
     return {
         "pitcher_name": name,
         "pitcher_throws": throws,
@@ -445,6 +464,9 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "pitcher_barrel_pct_allowed": round(barrel_allowed, 1),
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
+        "pitcher_mix_fb": pmix_fb,
+        "pitcher_mix_br": pmix_br,
+        "pitcher_mix_os": pmix_os,
     }
 
 
