@@ -25,6 +25,25 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
   and weather. If the network is unavailable, it falls back to a deterministic
   **synthetic demo slate** so the app always works.
 
+## Deploy
+
+The repo is deploy-ready for any of these:
+
+- **Streamlit Community Cloud** (easiest): point [share.streamlit.io](https://share.streamlit.io)
+  at this repo, branch `main`, main file `app.py`. Auto-redeploys on push.
+- **Docker** (Render / Railway / Fly.io / anywhere): a `Dockerfile` is included
+  and honors `$PORT`.
+  ```bash
+  docker build -t mlb-hr .
+  docker run -p 8501:8501 mlb-hr           # then open http://localhost:8501
+  ```
+- **Procfile** platforms (Render/Heroku-style) use the bundled `Procfile`.
+
+For **live data** set the network egress / outbound access to reach the hosts in
+the allowlist below, and optionally set `ODDS_API_KEY` for live HR odds. CI
+(`.github/workflows/ci.yml`) runs the tests on every push/PR; a daily workflow
+keeps the lineup HR log fresh.
+
 ---
 
 ## What the app shows
