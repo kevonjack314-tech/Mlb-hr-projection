@@ -207,6 +207,39 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     return table.reset_index(drop=True)
 
 
+# --- Pitch-type families (Statcast pitch_type codes -> FB / breaking / offspeed).
+_PITCH_FAMILY = {
+    "FF": "fb", "FA": "fb", "SI": "fb", "FT": "fb", "FC": "fb",   # fastballs/cutter
+    "SL": "br", "CU": "br", "KC": "br", "ST": "br", "SV": "br",   # breaking
+    "CS": "br", "SC": "br", "KN": "br",
+    "CH": "os", "FS": "os", "FO": "os",                            # offspeed
+}
+
+
+@lru_cache(maxsize=4)
+def _statcast_range(end_date_iso: str, lookback_days: int = 30):
+    """One cached Statcast pitch-level pull for the window. Returns df or None.
+
+    Shared by recent-form, pitch-mix, and batter-vs-pitch-type splits so the
+    heavy pull happens once per (end_date, lookback).
+    """
+    if not _HAS_PYB:
+        return None
+    end = dt.date.fromisoformat(end_date_iso)
+    start = end - dt.timedelta(days=lookback_days)
+    try:
+        sc = pyb.statcast(start_dt=start.isoformat(), end_dt=end.isoformat(), verbose=False)
+    except Exception:
+        return None
+    if sc is None or sc.empty or "batter" not in sc.columns:
+        return None
+    sc = sc.copy()
+    sc["game_date"] = pd.to_datetime(sc["game_date"], errors="coerce").dt.date
+    if "pitch_type" in sc.columns:
+        sc["pitch_family"] = sc["pitch_type"].map(_PITCH_FAMILY)
+    return sc
+
+
 @lru_cache(maxsize=8)
 def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     """7/15/30-day HR rates per MLBAM batter id from one Statcast date-range pull.
@@ -214,19 +247,10 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     Columns indexed by mlbam_id: hr_rate_7, hr_rate_15, hr_rate_30.
     Returns an empty DataFrame on any failure.
     """
-    if not _HAS_PYB:
+    sc = _statcast_range(end_date_iso, 30)
+    if sc is None:
         return pd.DataFrame()
     end = dt.date.fromisoformat(end_date_iso)
-    start = end - dt.timedelta(days=30)
-    try:
-        sc = pyb.statcast(start_dt=start.isoformat(), end_dt=end.isoformat(), verbose=False)
-    except Exception:
-        return pd.DataFrame()
-    if sc is None or sc.empty or "batter" not in sc.columns:
-        return pd.DataFrame()
-
-    sc = sc.copy()
-    sc["game_date"] = pd.to_datetime(sc["game_date"], errors="coerce").dt.date
     # A plate appearance ends on a row with a non-null `events`.
     pa_rows = sc[sc["events"].notna()]
 
@@ -247,6 +271,142 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     table = table.fillna(0.0)
     table.index.name = "mlbam_id"
     return table.reset_index()
+
+
+@lru_cache(maxsize=4)
+def get_pitch_mix_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
+    """Pitch mix (% fastball/breaking/offspeed) per pitcher MLBAM id.
+
+    Columns indexed by pitcher id: pitcher_mix_fb, pitcher_mix_br, pitcher_mix_os.
+    """
+    sc = _statcast_range(end_date_iso, lookback_days)
+    if sc is None or "pitch_family" not in sc.columns or "pitcher" not in sc.columns:
+        return pd.DataFrame()
+    df = sc[sc["pitch_family"].notna()]
+    if df.empty:
+        return pd.DataFrame()
+    counts = df.groupby(["pitcher", "pitch_family"]).size().unstack(fill_value=0)
+    totals = counts.sum(axis=1).replace(0, np.nan)
+    out = pd.DataFrame(index=counts.index)
+    for fam in ("fb", "br", "os"):
+        out[f"pitcher_mix_{fam}"] = (counts.get(fam, 0) / totals * 100.0).round(1)
+    out = out.dropna(how="all").fillna(0.0)
+    out.index.name = "pitcher_id"
+    return out.reset_index()
+
+
+@lru_cache(maxsize=4)
+def get_batter_pitch_splits(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
+    """Batter wOBA vs each pitch family (real, Statcast) per MLBAM batter id.
+
+    Uses woba_value/woba_denom summed over batted/PA-ending events. Columns:
+    vs_fb, vs_br, vs_os. A wider default window (45d) buffers the small samples.
+    """
+    sc = _statcast_range(end_date_iso, lookback_days)
+    if sc is None or "pitch_family" not in sc.columns:
+        return pd.DataFrame()
+    if "woba_value" not in sc.columns or "woba_denom" not in sc.columns:
+        return pd.DataFrame()
+    df = sc[sc["woba_denom"].notna() & sc["pitch_family"].notna()]
+    if df.empty:
+        return pd.DataFrame()
+    grp = df.groupby(["batter", "pitch_family"]).agg(
+        val=("woba_value", "sum"), den=("woba_denom", "sum")).reset_index()
+    grp["woba"] = (grp["val"] / grp["den"]).replace([np.inf, -np.inf], np.nan)
+    wide = grp.pivot(index="batter", columns="pitch_family", values="woba")
+    out = pd.DataFrame(index=wide.index)
+    for fam in ("fb", "br", "os"):
+        out[f"vs_{fam}"] = wide.get(fam, np.nan).round(3)
+    out.index.name = "mlbam_id"
+    return out.reset_index()
+
+
+@lru_cache(maxsize=4)
+def get_pitching_table(year: int) -> pd.DataFrame:
+    """Season pitcher peripherals from FanGraphs, keyed by normalized name.
+
+    Columns: pitcher_hr9, pitcher_gb_pct, pitcher_fb_pct, pitcher_barrel_pct_allowed.
+    Returns empty on failure.
+    """
+    if not _HAS_PYB:
+        return pd.DataFrame()
+    try:
+        fg = pyb.pitching_stats(year, qual=0)
+    except Exception:
+        return pd.DataFrame()
+    if fg is None or fg.empty:
+        return pd.DataFrame()
+    fg = fg.rename(columns={"Name": "name_full"})
+    fg["name_key"] = fg["name_full"].map(normalize_name)
+    out = pd.DataFrame({"name_key": fg["name_key"]})
+    out["pitcher_hr9"] = pd.to_numeric(fg.get("HR/9"), errors="coerce")
+    out["pitcher_gb_pct"] = fg.get("GB%").map(_coerce_pct) if "GB%" in fg else np.nan
+    out["pitcher_fb_pct"] = fg.get("FB%").map(_coerce_pct) if "FB%" in fg else np.nan
+    if "Barrel%" in fg:
+        out["pitcher_barrel_pct_allowed"] = fg["Barrel%"].map(_coerce_pct)
+    else:
+        out["pitcher_barrel_pct_allowed"] = np.nan
+    if "IP" in fg:
+        out["ip"] = pd.to_numeric(fg["IP"], errors="coerce")
+        out = out.sort_values("ip", ascending=False)
+    out = out.drop_duplicates("name_key", keep="first")
+    return out.reset_index(drop=True)
+
+
+@lru_cache(maxsize=2)
+def _pitch_mix_by_id(end_date_iso: str):
+    t = get_pitch_mix_table(end_date_iso)
+    return t.set_index("pitcher_id") if not t.empty else None
+
+
+@lru_cache(maxsize=2)
+def _batter_splits_by_id(end_date_iso: str):
+    t = get_batter_pitch_splits(end_date_iso)
+    return t.set_index("mlbam_id") if not t.empty else None
+
+
+@lru_cache(maxsize=2)
+def _pitching_by_name(year: int):
+    t = get_pitching_table(year)
+    return t.set_index("name_key") if not t.empty else None
+
+
+def lookup_pitch_mix(end_date_iso: str, pitcher_id) -> dict | None:
+    idx = _pitch_mix_by_id(end_date_iso)
+    if idx is None or pitcher_id is None or pitcher_id not in idx.index:
+        return None
+    row = idx.loc[pitcher_id]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    return {k: float(row[k]) for k in ("pitcher_mix_fb", "pitcher_mix_br", "pitcher_mix_os")
+            if k in row and not pd.isna(row[k])}
+
+
+def lookup_batter_splits(end_date_iso: str, batter_id) -> dict | None:
+    idx = _batter_splits_by_id(end_date_iso)
+    if idx is None or batter_id is None or batter_id not in idx.index:
+        return None
+    row = idx.loc[batter_id]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    return {k: float(row[k]) for k in ("vs_fb", "vs_br", "vs_os")
+            if k in row and not pd.isna(row[k])}
+
+
+def lookup_pitching(year: int, name: str | None) -> dict | None:
+    idx = _pitching_by_name(year)
+    key = normalize_name(name) if name else ""
+    if idx is None or not key or key not in idx.index:
+        return None
+    row = idx.loc[key]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    out = {}
+    for k in ("pitcher_hr9", "pitcher_gb_pct", "pitcher_fb_pct", "pitcher_barrel_pct_allowed"):
+        v = row.get(k)
+        if v is not None and not pd.isna(v):
+            out[k] = float(v)
+    return out or None
 
 
 @lru_cache(maxsize=1)

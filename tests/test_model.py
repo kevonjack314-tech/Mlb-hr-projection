@@ -128,3 +128,39 @@ def test_barrel_pa_xhr_and_pitch_matchup():
     under = df[df["hr_minus_xhr"] <= -2.0]
     assert len(under) > 0
     assert under["regression_score"].mean() > df["regression_score"].mean()
+
+
+def test_live_pitch_mix_and_splits_aggregation():
+    """The live Statcast aggregation logic (pitch mix + vs-pitch wOBA) is correct."""
+    import numpy as np
+    import pandas as pd
+    from src import statcast as sc
+
+    fake = pd.DataFrame({
+        "game_date": ["2025-06-18"] * 10,
+        "batter":  [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+        "pitcher": [9] * 10,
+        "pitch_type": ["FF", "FF", "SL", "CH", "FF", "SL", "FF", "CU", "CH", "FF"],
+        "events": ["home_run", None, "single", None, "strikeout",
+                   "double", None, None, "field_out", "walk"],
+        "woba_value": [2.0, np.nan, 0.9, np.nan, 0.0, 1.24, np.nan, np.nan, 0.0, 0.69],
+        "woba_denom": [1, np.nan, 1, np.nan, 1, 1, np.nan, np.nan, 1, 1],
+    })
+    fake["pitch_family"] = fake["pitch_type"].map(sc._PITCH_FAMILY)
+
+    orig = sc._statcast_range
+    sc._statcast_range = lambda end, lb=30: fake
+    try:
+        sc.get_pitch_mix_table.cache_clear()
+        sc.get_batter_pitch_splits.cache_clear()
+        mix = sc.get_pitch_mix_table("2025-06-18").set_index("pitcher_id")
+        assert mix.loc[9, "pitcher_mix_fb"] == 50.0
+        assert mix.loc[9, "pitcher_mix_br"] == 30.0
+        assert mix.loc[9, "pitcher_mix_os"] == 20.0
+        splits = sc.get_batter_pitch_splits("2025-06-18").set_index("mlbam_id")
+        assert abs(splits.loc[1, "vs_fb"] - 1.0) < 1e-6   # (2.0+0.0)/(1+1)
+        assert abs(splits.loc[2, "vs_br"] - 1.24) < 1e-6
+    finally:
+        sc._statcast_range = orig
+        sc.get_pitch_mix_table.cache_clear()
+        sc.get_batter_pitch_splits.cache_clear()

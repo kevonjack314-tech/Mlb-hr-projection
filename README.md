@@ -73,7 +73,9 @@ Then open the local URL Streamlit prints (default `http://localhost:8501`).
 | **xISO** (= xSLG − xBA) & **xSLG** (Statcast expected power) | **Baseball Savant** expected stats via `pybaseball` | Modeled profiles |
 | **Barrel/PA%** (barrels per plate appearance) | **Baseball Savant** exit-velo/barrels via `pybaseball` | Modeled profiles |
 | **Sprint speed** (ft/s, athletic context) | **Baseball Savant** sprint-speed via `pybaseball` | Modeled profiles |
-| **vs-pitch-type** (vs FB / breaking / offspeed) + pitcher mix | Modeled (hook for Statcast run value by pitch type) | Modeled |
+| **vs-pitch-type** (vs FB / breaking / offspeed wOBA) | **Baseball Savant** Statcast date-range (woba by pitch family) | Modeled |
+| **Pitcher peripherals** (HR/9, GB%, FB%, barrels allowed) | **FanGraphs** pitching via `pybaseball` | Modeled |
+| **Pitcher pitch mix** (FB / breaking / offspeed usage) | **Baseball Savant** Statcast date-range (pitch_type usage) | Modeled |
 | Recent form (7/15/30-day HR rate) | **Baseball Savant** Statcast date-range pull, aggregated by batter id | Modeled recent rates |
 
 Real Statcast/FanGraphs metrics are merged onto the real slate **per player**: each
@@ -143,10 +145,12 @@ positive-regression "due" signal that feeds the **Sneaky** score. *Sprint speed 
 shown as athletic context only — it has no measurable effect on HR power, so xHR is
 deliberately **not** sprint-adjusted.*
 
-**Pitch-type matchup.** The hitter's performance vs fastballs / breaking / offspeed
-is weighted by the probable pitcher's **pitch mix** into a pitch-arsenal edge that
-folds into the matchup multiplier and score (currently modeled; the real version
-pulls per-batter run value by pitch type from Statcast).
+**Pitch-type matchup.** The hitter's wOBA vs fastballs / breaking / offspeed is
+weighted by the probable pitcher's **pitch mix** into a pitch-arsenal edge that
+folds into the matchup multiplier and score. Both sides are **live**: the batter
+splits and the pitcher's pitch-type usage are aggregated from one shared Statcast
+date-range pull (also reused for recent form), and the pitcher's HR/9, GB%, FB% and
+barrels-allowed come from FanGraphs.
 
 ### 2. **HR probability** (≥1 HR in the game)
 
