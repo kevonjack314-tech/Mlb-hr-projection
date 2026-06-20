@@ -44,6 +44,44 @@ st.set_page_config(
 )
 
 
+def inject_css():
+    """A little visual polish: tighter headers, nicer cards, role-badge colors."""
+    st.markdown(
+        """
+        <style>
+          #MainMenu, footer {visibility: hidden;}
+          .block-container {padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1400px;}
+          h1 {font-weight: 800; letter-spacing: -0.5px;}
+          /* Metric cards */
+          [data-testid="stMetric"] {
+            background: #161b26; border: 1px solid #232a38; border-radius: 12px;
+            padding: 12px 14px;
+          }
+          [data-testid="stMetricLabel"] {opacity: .75; font-size: .8rem;}
+          /* Bordered containers -> soft cards */
+          div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 14px; border-color: #232a38 !important;
+          }
+          /* Tabs: bigger, pill-like, with a red active underline */
+          button[data-baseweb="tab"] {font-size: 0.98rem; font-weight: 600;}
+          .stTabs [aria-selected="true"] {color: #ff5864 !important;}
+          /* Buttons */
+          .stDownloadButton button, .stButton button {border-radius: 10px;}
+          /* Hero pick cards */
+          .pickcard {background: linear-gradient(160deg,#1b2230,#141923);
+            border: 1px solid #2a3346; border-radius: 16px; padding: 16px 18px; height: 100%;}
+          .pickcard .lab {font-size:.72rem; text-transform:uppercase; letter-spacing:1px; opacity:.7;}
+          .pickcard .name {font-size:1.18rem; font-weight:800; margin:.15rem 0;}
+          .pickcard .sub {opacity:.8; font-size:.85rem;}
+          .pickcard .big {font-size:1.5rem; font-weight:800; color:#ff5864;}
+          .role-pill {display:inline-block; padding:2px 9px; border-radius:999px;
+            font-size:.72rem; font-weight:700; margin-right:6px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Data loading (cached)
 # --------------------------------------------------------------------------- #
@@ -122,33 +160,42 @@ GLOSSARY = {
 # Sidebar — controls & methodology
 # --------------------------------------------------------------------------- #
 def sidebar_controls():
-    st.sidebar.title("⚾ HR Projection Tool")
-    st.sidebar.caption("Ranked HR upside for any MLB slate")
+    st.sidebar.title("⚾ HR Hunter")
+    st.sidebar.caption("Ranked home-run upside for any MLB slate")
 
     game_date = st.sidebar.date_input(
-        "Game date", value=dt.date.today(),
+        "📅 Game date", value=dt.date.today(),
         help="Pick any MLB date. Defaults to today.",
     )
+    simple = st.sidebar.toggle(
+        "✨ Simple view", value=True,
+        help="Show just the key columns (Player, odds, HR%, a couple of metrics). "
+             "Turn off for the full metric set.",
+    )
+    st.session_state["simple_view"] = simple
+
     prefer_live = st.sidebar.toggle(
-        "Try live data (MLB StatsAPI + weather)", value=True,
-        help="If off (or if the network is unavailable), a deterministic synthetic slate is used.",
+        "🛰️ Try live data", value=True,
+        help="Pull the real schedule, lineups, Statcast metrics and weather. Falls "
+             "back to a deterministic demo slate if the network is unavailable.",
     )
-    live_odds = st.sidebar.toggle(
-        "Use live HR odds (needs ODDS_API_KEY)", value=False,
-        help="Pull real sportsbook HR odds from The Odds API when an ODDS_API_KEY "
-             "env var is set. Otherwise odds are model-implied (fair price + hold).",
-    )
-    lookback = st.sidebar.slider(
-        "Backtest lookback (days)", min_value=7, max_value=45, value=31, step=1,
-        help="Window of past HRs analyzed for the Trends tab (default ~1 month).",
-    )
-    half_life = st.sidebar.slider(
-        "Trend strength — recency half-life (days)", min_value=2, max_value=30,
-        value=10, step=1,
-        help="How fast older HRs fade in the profile match. A 10-day half-life "
-             "means an HR from 10 days ago counts half as much as one today. "
-             "Lower = more reactive to the hottest recent profiles.",
-    )
+
+    with st.sidebar.expander("⚙️ Advanced settings", expanded=False):
+        live_odds = st.toggle(
+            "Use live HR odds (needs ODDS_API_KEY)", value=False,
+            help="Real sportsbook HR odds from The Odds API when an ODDS_API_KEY "
+                 "env var is set. Otherwise odds are model-implied (fair + hold).",
+        )
+        lookback = st.slider(
+            "Backtest lookback (days)", min_value=7, max_value=45, value=31, step=1,
+            help="Window of past HRs analyzed for the Trends tab (~1 month default).",
+        )
+        half_life = st.slider(
+            "Trend recency half-life (days)", min_value=2, max_value=30, value=10, step=1,
+            help="How fast older HRs fade in the Profile Match. Lower = more reactive "
+                 "to the hottest recent profiles.",
+        )
+
     if st.sidebar.button("🔄 Refresh data", use_container_width=True):
         load_scored_slate.clear()
         load_hr_history.clear()
@@ -283,6 +330,16 @@ DISPLAY_COLUMNS = {
     "sneaky_reasons": "Sneaky Reasons",
 }
 
+# Raw column keys kept in "Simple view" — the at-a-glance essentials. Detailed
+# view shows everything. The active headline/sort column is always added back.
+ESSENTIAL_KEYS = {
+    "player", "team", "opponent", "pitcher_name", "lineup_spot",
+    "hr_score", "hr_prob_game", "book_odds", "edge_pct", "fair_odds",
+    "longshot_score", "consistency_score", "sneaky_score",
+    "barrel_pct", "max_ev", "park_factor", "role",
+    "rationale", "sneaky_reasons",
+}
+
 COLUMN_CONFIG = {
     "HR Score": st.column_config.ProgressColumn(
         "HR Score", help=GLOSSARY["HR Score"], min_value=0, max_value=100, format="%.1f"
@@ -353,8 +410,17 @@ def prep_display(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return out
 
 
+def _simplify(columns: list[str], sort_col: str) -> list[str]:
+    """In Simple view, keep only essential columns (plus the active sort col)."""
+    if not st.session_state.get("simple_view", True):
+        return columns
+    # The sort_col is a display label; keep its raw key so sorting still works.
+    keep_raw = {k for k, v in DISPLAY_COLUMNS.items() if v == sort_col}
+    return [c for c in columns if c in ESSENTIAL_KEYS or c in keep_raw]
+
+
 def render_table(df: pd.DataFrame, columns: list[str], sort_col: str, key: str):
-    disp = prep_display(df, columns)
+    disp = prep_display(df, _simplify(columns, sort_col))
     disp = disp.sort_values(sort_col, ascending=False) if sort_col in disp.columns else disp
     st.dataframe(
         disp,
@@ -887,18 +953,74 @@ def tab_value_finder(df):
     _render_parlay(res, 10.0)
 
 
+def _pick_card(label, name, sub, big, extra=""):
+    st.markdown(
+        f"<div class='pickcard'><div class='lab'>{label}</div>"
+        f"<div class='name'>{name}</div><div class='sub'>{sub}</div>"
+        f"<div class='big'>{big}</div><div class='sub'>{extra}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_top_picks(df):
+    """At-a-glance hero cards: top pick, safest, best value, and a quick parlay."""
+    if df.empty:
+        return
+    st.markdown("#### ⭐ Today's top picks")
+    c1, c2, c3, c4 = st.columns(4)
+
+    top = df.sort_values("hr_score", ascending=False).iloc[0]
+    with c1:
+        _pick_card("🥇 Top pick", top["player"],
+                   f"{top['team']} vs {top['opponent']} · {format_american(top['book_odds'])}",
+                   f"{top['hr_prob_game']*100:.0f}%", "to hit a HR (model)")
+
+    safe = df.sort_values("hr_prob_game", ascending=False).iloc[0]
+    with c2:
+        _pick_card("🔒 Safest bat", safe["player"],
+                   f"{safe['team']} vs {safe['opponent']} · HR Score {safe['hr_score']:.0f}",
+                   f"{safe['hr_prob_game']*100:.0f}%", "highest HR probability")
+
+    val = df.sort_values("edge_pct", ascending=False).iloc[0]
+    with c3:
+        _pick_card("💎 Best value", val["player"],
+                   f"{val['team']} vs {val['opponent']} · {format_american(val['book_odds'])}",
+                   f"{val['edge_pct']:+.1f}%", "model edge vs the book")
+
+    with c4:
+        res = generate_parlay(df, n_legs=3, strategy="ulx")
+        s = res["summary"]
+        names = " · ".join(res["legs"]["player"].tolist()) if not res["legs"].empty else "—"
+        _pick_card("🎰 Suggested 3-leg", s.get("combined_american_str", "—"),
+                   names, s.get("light", ""), f"model win {s.get('model_prob','—')}%")
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def main():
+    inject_css()
     game_date, prefer_live, lookback, half_life, live_odds = sidebar_controls()
     methodology_sidebar()
 
-    st.title("⚾ MLB Home Run Projection Tool")
+    st.title("⚾ MLB Home Run Hunter")
     st.caption(
-        "Ranked home-run upside built on Statcast-style batted-ball quality, recent "
-        "form, pitcher matchup, park factors, and weather."
+        "Who's most likely to go deep today — ranked by a transparent model over "
+        "Statcast power, recent form, matchup, park & weather."
     )
+    with st.expander("👋 New here? How to use this", expanded=False):
+        st.markdown(
+            "1. **Pick a date** in the sidebar (defaults to today).\n"
+            "2. Check **⭐ Today's top picks** below for the headline plays.\n"
+            "3. Browse the tabs: **🚀 Longshots** (boom-or-bust), **🎯 Consistent** "
+            "(safe power), **🕵️ Sneaky** (value), **📊 All** (full board).\n"
+            "4. **🎰 Parlay Builder** auto-builds smart 1–5 leg HR parlays; "
+            "**💎 Value Finder** lists the best price edges; **📈 Trends** shows who's "
+            "been homering and why.\n"
+            "5. Toggle **✨ Simple view** off (sidebar) to see every advanced metric, "
+            "and hover any column header for a plain-language definition.\n\n"
+            "_Projections are model estimates for research/entertainment — not betting advice._"
+        )
 
     scored, source, notes = load_scored_slate(game_date.isoformat(), prefer_live)
 
@@ -936,6 +1058,9 @@ def main():
     odds_badge = "🟢 LIVE" if (filtered.get("odds_is_live", pd.Series([False])).any()) else "🟡 model-implied"
     st.markdown(f"**{len(filtered)}** hitters · **{filtered['game'].nunique()}** games · "
                 f"HR odds: {odds_badge}")
+
+    render_top_picks(filtered)
+    st.markdown("")
 
     t1, t2, t3, t4, t5, t6, t7 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
