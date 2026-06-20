@@ -675,6 +675,40 @@ def tab_previous_hrs(history):
             st.caption("Middle-order spots (3-5) usually lead — exactly why the parlay "
                        "builder anchors there.")
 
+    # --- Batters by lineup spot (names under each spot) ---
+    if events is not None and not events.empty and "lineup_spot" in events.columns:
+        ev = events.dropna(subset=["lineup_spot"]).copy()
+        if not ev.empty:
+            ev["lineup_spot"] = ev["lineup_spot"].astype(int)
+            ev["hrs"] = ev["hr_count"] if "hr_count" in ev.columns else 1
+            spots_present = sorted(ev["lineup_spot"].unique())
+            st.markdown("##### 🔢 Batters by lineup spot")
+            st.caption("Which hitters went deep from each batting-order spot in the window.")
+            spot_tabs = st.tabs([f"#{s}" for s in spots_present])
+            for tab, s in zip(spot_tabs, spots_present):
+                with tab:
+                    grp = ev[ev["lineup_spot"] == s]
+                    agg = {"hrs": ("hrs", "sum")}
+                    if "barrel_pct" in grp.columns:
+                        agg["barrel"] = ("barrel_pct", "mean")
+                    if "max_ev" in grp.columns:
+                        agg["maxev"] = ("max_ev", "max")
+                    tbl = grp.groupby(["player", "team"]).agg(**agg).reset_index()
+                    tbl = tbl.sort_values("hrs", ascending=False)
+                    ren = {"player": "Player", "team": "Team", "hrs": "HRs",
+                           "barrel": "Barrel%", "maxev": "Max EV"}
+                    st.caption(f"**{int(grp['hrs'].sum())} HRs** from the {s}-spot · "
+                               f"**{grp['player'].nunique()}** hitters")
+                    st.dataframe(
+                        tbl.rename(columns=ren), hide_index=True, use_container_width=True,
+                        height=min(420, 60 + 35 * min(len(tbl), 10)),
+                        column_config={
+                            "HRs": st.column_config.NumberColumn("HRs", format="%d"),
+                            "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
+                            "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
+                        },
+                    )
+
     render_hr_stat_sheet(events, start_iso, end_iso)
 
 
