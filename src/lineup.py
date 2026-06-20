@@ -101,6 +101,10 @@ def update_log_from_history(slate_hist: pd.DataFrame) -> int:
         "hit_hr" if "hit_hr" in slate_hist.columns else None)
     new = slate_hist[["date", "player", "team", "lineup_spot"]].copy()
     new["hr"] = (slate_hist[hr_col].astype(float) if hr_col else 0.0)
+    # Store the model's pre-game rating too, so the system can learn over time
+    # which ratings actually homer (see learn.py).
+    if "hr_score" in slate_hist.columns:
+        new["hr_score"] = slate_hist["hr_score"].astype(float)
     existing = load_log()
     combined = pd.concat([existing, new], ignore_index=True)
     combined = combined.drop_duplicates(subset=["date", "player"], keep="last")

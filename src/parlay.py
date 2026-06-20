@@ -89,6 +89,11 @@ def role_fit(row: pd.Series, role: str) -> float:
     # Recurring HR-by-spot signal: HR/game from this exact spot, scaled to ~0-8.
     rate = row.get("spot_hr_rate")
     hist_bonus = float(min(8.0, (rate or 0.0) * 40.0)) if pd.notna(rate) else 0.0
+    # Self-calibration: if history says this rating homers MORE than the model
+    # credits (positive cal_edge), lean into it — improves picks over time.
+    cal = row.get("cal_edge_pct")
+    cal_bonus = float(min(6.0, max(0.0, cal))) if pd.notna(cal) else 0.0
+    hist_bonus += cal_bonus
     if role == "Anchor":
         return float(row.get("hr_score", 0)) + spot_bonus + hist_bonus
     if role == "Value":

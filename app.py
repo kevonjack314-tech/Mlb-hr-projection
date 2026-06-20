@@ -26,6 +26,11 @@ from src.model import (
     RECENT_FORM_WEIGHTS,
     score_slate,
 )
+from src.learn import (
+    attach_calibrated_prob,
+    hit_rate_by_score,
+    model_report_card,
+)
 from src.lineup import (
     attach_spot_signal,
     league_spot_table,
@@ -105,8 +110,11 @@ def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_d
     update_log_from_history(slate_hist)
     player_spot = player_spot_hr(slate_hist)
     league_spot = league_spot_table(slate_hist)
+    # Self-calibration: empirical HR rate by model rating + a model report card.
+    score_curve = hit_rate_by_score(slate_hist)
+    report = model_report_card(events, slate_hist)
     return (events, summary, centroid, calib, trend, player_spot, league_spot,
-            source, notes)
+            score_curve, report, source, notes)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +125,8 @@ GLOSSARY = {
     "HR Prob (game)": "Modeled probability the hitter hits ≥1 HR in this game (per-PA rate compounded over ~4.1 PA).",
     "xHR (game)": "Expected home runs in THIS game = per-PA HR rate × expected PA.",
     "Fair Odds": "Vig-free American odds implied by the model's game HR probability.",
+    "Calib HR%": "Self-calibrated HR probability — the ACTUAL HR rate that bats with this pre-game HR Score produced over the trailing window. The system relearns this each run.",
+    "Calib Edge": "Calibrated HR% minus model HR%. Positive = history says this rating homers more than the model credits; the parlay builder leans into it.",
     "Book Odds": "American odds to hit ≥1 HR you'd actually bet — LIVE from a sportsbook when an ODDS_API_KEY is configured, else a model-implied market price (fair price + typical hold).",
     "Edge%": "Model HR% minus the book's implied HR%. Positive = +EV (model thinks the bat is underpriced). With model-implied odds it sits near −hold (the vig).",
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
@@ -286,6 +296,8 @@ DISPLAY_COLUMNS = {
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
     "hr_prob_game": "HR Prob (game)",
+    "calibrated_hr_prob": "Calib HR%",
+    "cal_edge_pct": "Calib Edge",
     "xhr": "xHR (game)",
     "fair_odds": "Fair Odds",
     "book_odds": "Book Odds",
@@ -334,7 +346,8 @@ DISPLAY_COLUMNS = {
 # view shows everything. The active headline/sort column is always added back.
 ESSENTIAL_KEYS = {
     "player", "team", "opponent", "pitcher_name", "lineup_spot",
-    "hr_score", "hr_prob_game", "book_odds", "edge_pct", "fair_odds",
+    "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
+    "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
     "barrel_pct", "max_ev", "park_factor", "role",
     "rationale", "sneaky_reasons",
@@ -353,6 +366,8 @@ COLUMN_CONFIG = {
     "HR Prob (game)": st.column_config.NumberColumn(
         "HR Prob (game)", help=GLOSSARY["HR Prob (game)"], format="%.1f%%"
     ),
+    "Calib HR%": st.column_config.NumberColumn("Calib HR%", help=GLOSSARY["Calib HR%"], format="%.0f%%"),
+    "Calib Edge": st.column_config.NumberColumn("Calib Edge", help=GLOSSARY["Calib Edge"], format="%+.1f"),
     "xHR (game)": st.column_config.NumberColumn("xHR (game)", help=GLOSSARY["xHR (game)"], format="%.2f"),
     "xHR (season)": st.column_config.NumberColumn("xHR (season)", help=GLOSSARY["xHR (season)"], format="%.1f"),
     "HR−xHR": st.column_config.NumberColumn("HR−xHR", help=GLOSSARY["HR−xHR"], format="%+.1f"),
@@ -407,6 +422,8 @@ def prep_display(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     out = df[cols].rename(columns=DISPLAY_COLUMNS)
     if "HR Prob (game)" in out.columns:
         out["HR Prob (game)"] = out["HR Prob (game)"] * 100.0
+    if "Calib HR%" in out.columns:
+        out["Calib HR%"] = out["Calib HR%"] * 100.0
     return out
 
 
@@ -575,6 +592,21 @@ def _top5_card_grid(tops: dict):
                      use_container_width=True)
 
 
+def _model_verdict(score) -> str:
+    """Did the model like this bat pre-game, given its HR Score?"""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return "—"
+    if s >= 60:
+        return "✅ Loved"
+    if s >= 48:
+        return "👍 Liked"
+    if s >= 35:
+        return "😐 Lukewarm"
+    return "⚠️ Missed"
+
+
 def render_hr_stat_sheet(events, start_iso, end_iso):
     """The line-by-line previous-HR stat sheet (with lineup spot) + per-HR detail."""
     if events is None or events.empty:
@@ -596,39 +628,50 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
     if name_q:
         sheet = sheet[sheet["player"].str.contains(name_q, case=False, na=False)]
 
-    sheet_sorted = sheet.sort_values("date", ascending=False)
+    sheet_sorted = sheet.sort_values("date", ascending=False).copy()
+    # What the model would have rated them, pre-game.
+    if "hr_prob_game" in sheet_sorted.columns:
+        from src.parlay import assign_role
+        sheet_sorted["role"] = sheet_sorted["hr_prob_game"].map(assign_role)
+    if "hr_score" in sheet_sorted.columns:
+        sheet_sorted["verdict"] = sheet_sorted["hr_score"].map(_model_verdict)
     sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
-                              "hr_count", "pitcher_name", "pitcher_throws", "park_factor",
-                              "wind_mult", "barrel_pct", "max_ev", "hr_fb", "xiso",
-                              "recent_form_score", "hr_prob_game", "rationale"]
+                              "hr_count", "hr_score", "hr_prob_game", "role", "verdict",
+                              "barrel_pct", "max_ev", "hr_fb", "xiso", "park_factor",
+                              "recent_form_score", "pitcher_name", "rationale"]
                   if c in sheet_sorted.columns]
     show = sheet_sorted[sheet_cols].rename(columns={
         "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
-        "lineup_spot": "Spot", "hr_count": "HR", "pitcher_name": "Off Pitcher",
-        "pitcher_throws": "P-Hand", "park_factor": "Park", "wind_mult": "Wind×",
+        "lineup_spot": "Spot", "hr_count": "HR", "hr_score": "Model Score",
+        "hr_prob_game": "Model HR%", "role": "Role", "verdict": "Model take",
+        "pitcher_name": "Off Pitcher", "park_factor": "Park",
         "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
-        "recent_form_score": "Recent Form", "hr_prob_game": "Model HR%",
-        "rationale": "Why they hit"})
+        "recent_form_score": "Recent Form", "rationale": "Why they hit"})
     if "Spot" in show.columns:
         show["Spot"] = show["Spot"].astype("Int64")
     if "HR" in show.columns:
         show["HR"] = show["HR"].astype(int)
     if "Model HR%" in show.columns:
         show["Model HR%"] = (show["Model HR%"] * 100).round(0)
-    st.markdown(f"**{len(show)}** home runs shown")
+    if "Spot" in show.columns:
+        show["Spot"] = show["Spot"].astype("Int64")
+    st.markdown(f"**{len(show)}** home runs shown · _Model Score / HR% / Role / take = "
+                "what the model rated them **before** the game_")
     st.dataframe(
         show, hide_index=True, use_container_width=True,
         height=min(620, 60 + 35 * min(len(show), 16)),
         column_config={
             "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
+            "Model Score": st.column_config.ProgressColumn("Model Score", help="The model's pre-game HR Score (0-100) for this bat.", min_value=0, max_value=100, format="%.0f"),
+            "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
+            "Role": st.column_config.TextColumn("Role", help="ULX role the model put them in pre-game (Anchor/Value/Longshot)."),
+            "Model take": st.column_config.TextColumn("Model take", help="Did the model like them pre-game? ✅ Loved / 👍 Liked / 😐 Lukewarm / ⚠️ Missed."),
             "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
             "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
             "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
             "xISO": st.column_config.NumberColumn("xISO", format="%.3f"),
             "Park": st.column_config.NumberColumn("Park", format="%.0f"),
-            "Wind×": st.column_config.NumberColumn("Wind×", format="%.2f"),
             "Recent Form": st.column_config.ProgressColumn("Recent Form", min_value=0, max_value=100, format="%.0f"),
-            "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
             "Why they hit": st.column_config.TextColumn("Why they hit", width="large"),
         },
     )
@@ -645,16 +688,33 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
 
 
 def tab_previous_hrs(history):
-    (events, _summary, _centroid, _calib, _trend, league_spot, source, _notes,
-     start_iso, end_iso, _half_life) = history
+    (events, _summary, _centroid, _calib, _trend, league_spot, _curve, report,
+     source, _notes, start_iso, end_iso, _half_life) = history
     st.subheader("📋 Previous HRs & lineup spot")
     badge = "🟢" if source.startswith("LIVE") else "🟡"
     st.caption(
         f"{badge} **{source}** — every home run from **{start_iso} → {end_iso}**, the "
-        "**batting-order spot** it was hit from, the pre-game metrics, and *why* they "
-        "went deep. (Live mode pulls the real lineup spot from each game's box score; "
-        "the demo slate uses modeled spots.)"
+        "**batting-order spot** it was hit from, the pre-game metrics, **what the model "
+        "rated them**, and *why* they went deep. (Live mode pulls the real lineup spot "
+        "from each game's box score; the demo slate uses modeled spots.)"
     )
+
+    # --- Model report card: where it went right / wrong ---
+    if report:
+        st.markdown("##### 🎯 Model report card — right or wrong?")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("HRs the model liked", f"{report.get('liked_pct','—')}%",
+                  help="Share of HR hitters the model rated 'live' pre-game (HR Score ≥ 48).")
+        r2.metric("…loved", f"{report.get('loved_pct','—')}%",
+                  help="Share rated elite pre-game (HR Score ≥ 60).")
+        r3.metric("Avg rating — HR hitters", report.get("avg_hr_hitter_score", "—"),
+                  delta=(round(report["avg_hr_hitter_score"] - report["field_score"], 1)
+                         if report.get("field_score") is not None else None),
+                  help="Average pre-game HR Score of players who homered vs. the field (delta).")
+        r4.metric("Avg pre-game HR%", f"{report.get('avg_prob','—')}%")
+        st.caption(f"📝 {report.get('verdict','')} — this feeds the **calibrated** "
+                   "projection (and the parlay builder leans into ratings that "
+                   "out-homer their model number).")
 
     if league_spot is not None and not league_spot.empty:
         ls = league_spot.sort_values("lineup_spot")
@@ -689,6 +749,8 @@ def tab_previous_hrs(history):
                 with tab:
                     grp = ev[ev["lineup_spot"] == s]
                     agg = {"hrs": ("hrs", "sum")}
+                    if "hr_score" in grp.columns:
+                        agg["mscore"] = ("hr_score", "mean")
                     if "barrel_pct" in grp.columns:
                         agg["barrel"] = ("barrel_pct", "mean")
                     if "max_ev" in grp.columns:
@@ -696,7 +758,7 @@ def tab_previous_hrs(history):
                     tbl = grp.groupby(["player", "team"]).agg(**agg).reset_index()
                     tbl = tbl.sort_values("hrs", ascending=False)
                     ren = {"player": "Player", "team": "Team", "hrs": "HRs",
-                           "barrel": "Barrel%", "maxev": "Max EV"}
+                           "mscore": "Model Score", "barrel": "Barrel%", "maxev": "Max EV"}
                     st.caption(f"**{int(grp['hrs'].sum())} HRs** from the {s}-spot · "
                                f"**{grp['player'].nunique()}** hitters")
                     st.dataframe(
@@ -704,6 +766,7 @@ def tab_previous_hrs(history):
                         height=min(420, 60 + 35 * min(len(tbl), 10)),
                         column_config={
                             "HRs": st.column_config.NumberColumn("HRs", format="%d"),
+                            "Model Score": st.column_config.ProgressColumn("Model Score", min_value=0, max_value=100, format="%.0f"),
                             "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
                             "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
                         },
@@ -713,8 +776,8 @@ def tab_previous_hrs(history):
 
 
 def tab_trends(history, projection_slate):
-    (events, summary, centroid, calib, trend, league_spot, source, notes,
-     start_iso, end_iso, half_life) = history
+    (events, summary, centroid, calib, trend, league_spot, _curve, _report,
+     source, notes, start_iso, end_iso, half_life) = history
     st.subheader("📈 HR Trends & Backtest")
     badge = "🟢" if source.startswith("LIVE") else "🟡"
     st.caption(
@@ -1109,12 +1172,14 @@ def main():
     start_iso = (game_date - dt.timedelta(days=lookback)).isoformat()
     end_iso = game_date.isoformat()
     (events, summary, centroid, calib, trend, player_spot, league_spot,
-     h_source, h_notes) = load_hr_history(start_iso, end_iso, prefer_live, float(half_life))
+     score_curve, report, h_source, h_notes) = load_hr_history(
+        start_iso, end_iso, prefer_live, float(half_life))
     scored = add_profile_similarity(scored, centroid)
     scored = attach_spot_signal(scored, player_spot)
+    scored = attach_calibrated_prob(scored, score_curve)   # learn from past ratings
     scored = attach_odds(scored, end_iso, use_live=live_odds)
-    history = (events, summary, centroid, calib, trend, league_spot, h_source,
-               h_notes, start_iso, end_iso, half_life)
+    history = (events, summary, centroid, calib, trend, league_spot, score_curve,
+               report, h_source, h_notes, start_iso, end_iso, half_life)
 
     filtered = filter_controls(scored)
     if filtered.empty:
