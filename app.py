@@ -558,18 +558,25 @@ def tab_trends(history, projection_slate):
         if name_q:
             sheet = sheet[sheet["player"].str.contains(name_q, case=False, na=False)]
 
+        sheet_sorted = sheet.sort_values("date", ascending=False)
         sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
-                                  "hr_count", "barrel_pct", "max_ev", "hr_fb", "xiso",
-                                  "park_factor", "pitcher_name"] if c in sheet.columns]
-        show = sheet.sort_values("date", ascending=False)[sheet_cols].rename(columns={
+                                  "hr_count", "pitcher_name", "pitcher_throws", "park_factor",
+                                  "wind_mult", "barrel_pct", "max_ev", "hr_fb", "xiso",
+                                  "recent_form_score", "hr_prob_game", "rationale"]
+                      if c in sheet_sorted.columns]
+        show = sheet_sorted[sheet_cols].rename(columns={
             "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
-            "lineup_spot": "Spot", "hr_count": "HR", "barrel_pct": "Barrel%",
-            "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
-            "park_factor": "Park", "pitcher_name": "Off Pitcher"})
+            "lineup_spot": "Spot", "hr_count": "HR", "pitcher_name": "Off Pitcher",
+            "pitcher_throws": "P-Hand", "park_factor": "Park", "wind_mult": "Wind×",
+            "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
+            "recent_form_score": "Recent Form", "hr_prob_game": "Model HR%",
+            "rationale": "Why they hit"})
         if "Spot" in show.columns:
             show["Spot"] = show["Spot"].astype("Int64")
         if "HR" in show.columns:
             show["HR"] = show["HR"].astype(int)
+        if "Model HR%" in show.columns:
+            show["Model HR%"] = (show["Model HR%"] * 100).round(0)
         st.markdown(f"**{len(show)}** home runs shown")
         st.dataframe(
             show, hide_index=True, use_container_width=True,
@@ -581,10 +588,23 @@ def tab_trends(history, projection_slate):
                 "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
                 "xISO": st.column_config.NumberColumn("xISO", format="%.3f"),
                 "Park": st.column_config.NumberColumn("Park", format="%.0f"),
+                "Wind×": st.column_config.NumberColumn("Wind×", format="%.2f"),
+                "Recent Form": st.column_config.ProgressColumn("Recent Form", min_value=0, max_value=100, format="%.0f"),
+                "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
+                "Why they hit": st.column_config.TextColumn("Why they hit", width="large"),
             },
         )
         st.download_button("⬇️ Export HR stat sheet to CSV", show.to_csv(index=False).encode(),
                            file_name="hr_stat_sheet.csv", mime="text/csv", key="dl_statsheet")
+
+        # Per-HR detail: pre-game metrics + the "why they hit" insight.
+        with st.expander("🔍 HR detail — pre-game metrics & why they hit", expanded=False):
+            opts = [f"{r['date']} · {r['player']} ({r.get('team','')})"
+                    for _, r in sheet_sorted.head(150).iterrows()]
+            if opts:
+                pick = st.selectbox("Pick a home run", opts, key="hr_detail_pick")
+                idx = opts.index(pick)
+                _render_hr_detail(sheet_sorted.head(150).iloc[idx])
 
     st.markdown("##### 🔬 Shared profile of HR hitters vs. all hitters")
     st.caption("How much HR hitters out-index the slate baseline on each metric.")
@@ -766,6 +786,62 @@ def tab_parlay(df):
         )
         if choices:
             _render_parlay(summarize_selection(df, choices), stake)
+
+
+def _build_hr_insight(row) -> str:
+    """A plain-language 'why they hit' narrative from the pre-game metrics."""
+    spot = row.get("lineup_spot")
+    spot_txt = f"the {int(spot)}-hole" if pd.notna(spot) else "the lineup"
+    php = row.get("pitcher_throws", "R")
+    pitcher = row.get("pitcher_name") or "the starter"
+    parts = [f"**{row['player']}** ({row.get('team','')}) went deep from {spot_txt} "
+             f"vs {php}HP {pitcher}."]
+    pre = row.get("hr_prob_game")
+    if pd.notna(pre):
+        odds = format_american(row.get("fair_odds")) if pd.notna(row.get("fair_odds")) else ""
+        parts.append(f"Pre-game model HR chance **{pre*100:.0f}%** ({odds} fair).")
+    why = row.get("rationale", "")
+    if why:
+        parts.append(f"Drivers: {why}.")
+    sneaky = row.get("sneaky_reasons", "")
+    if sneaky:
+        parts.append(f"Angle: {sneaky}.")
+    r7 = row.get("hr_rate_7")
+    if pd.notna(r7) and r7 > 0:
+        parts.append(f"Was hot — ~{r7:.3f} HR/PA over the prior 7 days.")
+    return " ".join(parts)
+
+
+def _render_hr_detail(row):
+    """A detail card: pre-game metrics grouped + the 'why they hit' insight."""
+    st.markdown(_build_hr_insight(row))
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        st.markdown("**Power (pre-game)**")
+        st.markdown(
+            f"- Barrel%: {row.get('barrel_pct','—')}\n"
+            f"- Barrel/PA%: {row.get('brl_pa','—')}\n"
+            f"- Max EV: {row.get('max_ev','—')}\n"
+            f"- xISO: {row.get('xiso','—')}\n"
+            f"- HR/FB: {row.get('hr_fb','—')}"
+        )
+    with g2:
+        st.markdown("**Context**")
+        st.markdown(
+            f"- Lineup spot: {int(row['lineup_spot']) if pd.notna(row.get('lineup_spot')) else '—'}\n"
+            f"- Park factor: {row.get('park_factor','—')}\n"
+            f"- Wind ×: {row.get('wind_mult','—')} · Temp: {row.get('temp_f','—')}°F\n"
+            f"- Platoon edge: {'yes' if row.get('platoon_adv') else 'no'}\n"
+            f"- Pitcher HR/9: {row.get('pitcher_hr9','—')}"
+        )
+    with g3:
+        st.markdown("**Form & model**")
+        st.markdown(
+            f"- Recent form score: {row.get('recent_form_score','—')}\n"
+            f"- HR rate 7/15/30d: {row.get('hr_rate_7','—')}/{row.get('hr_rate_15','—')}/{row.get('hr_rate_30','—')}\n"
+            f"- HR Score: {row.get('hr_score','—')}\n"
+            f"- Model game HR%: {row.get('hr_prob_game',0)*100:.0f}%"
+        )
 
 
 def tab_value_finder(df):
