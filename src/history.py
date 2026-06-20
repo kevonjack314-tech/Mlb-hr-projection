@@ -137,6 +137,9 @@ def _live_hr_history(start_iso: str, end_iso: str):
             home_abbr = _SAVANT_TEAM_FIX.get(r.get("home_team"), r.get("home_team"))
             stand = (r.get("stand") or "R")
             park = get_park(home_abbr)
+            away_abbr = _SAVANT_TEAM_FIX.get(r.get("away_team"), r.get("away_team"))
+            # Batter's team: away bats in the top of the inning, home in the bottom.
+            batter_team = away_abbr if str(r.get("inning_topbot", "")).startswith("Top") else home_abbr
             prof = {}
             if season_by_id is not None and r.get("batter") in season_by_id.index:
                 srow = season_by_id.loc[r["batter"]]
@@ -153,8 +156,10 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 "player": r.get("player_name"),
                 "mlbam_id": r.get("batter"),
                 "bats": stand,
+                "team": batter_team,
                 "home_team": home_abbr,
-                "opponent": None,
+                "lineup_spot": None,
+                "opponent": away_abbr if batter_team == home_abbr else home_abbr,
                 "pitcher_throws": r.get("p_throws", "R"),
                 "hr_ev": r.get("launch_speed"),
                 "hr_la": r.get("launch_angle"),
