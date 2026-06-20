@@ -575,6 +575,109 @@ def _top5_card_grid(tops: dict):
                      use_container_width=True)
 
 
+def render_hr_stat_sheet(events, start_iso, end_iso):
+    """The line-by-line previous-HR stat sheet (with lineup spot) + per-HR detail."""
+    if events is None or events.empty:
+        st.warning("No HR history available for this window.")
+        return
+    sheet = events.copy()
+    spot_opts = (sorted(int(s) for s in sheet["lineup_spot"].dropna().unique())
+                 if "lineup_spot" in sheet.columns else [])
+    team_opts = sorted(sheet["team"].dropna().unique()) if "team" in sheet.columns else []
+    fc1, fc2, fc3 = st.columns([1, 1, 1])
+    sel_spots = fc1.multiselect("Lineup spot", spot_opts, default=[],
+                                help="e.g. pick 5 and 6 to see HRs hit from the 5-6 holes.")
+    sel_teams = fc2.multiselect("Team", team_opts, default=[])
+    name_q = fc3.text_input("Player contains", "")
+    if sel_spots and "lineup_spot" in sheet.columns:
+        sheet = sheet[sheet["lineup_spot"].isin(sel_spots)]
+    if sel_teams and "team" in sheet.columns:
+        sheet = sheet[sheet["team"].isin(sel_teams)]
+    if name_q:
+        sheet = sheet[sheet["player"].str.contains(name_q, case=False, na=False)]
+
+    sheet_sorted = sheet.sort_values("date", ascending=False)
+    sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
+                              "hr_count", "pitcher_name", "pitcher_throws", "park_factor",
+                              "wind_mult", "barrel_pct", "max_ev", "hr_fb", "xiso",
+                              "recent_form_score", "hr_prob_game", "rationale"]
+                  if c in sheet_sorted.columns]
+    show = sheet_sorted[sheet_cols].rename(columns={
+        "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
+        "lineup_spot": "Spot", "hr_count": "HR", "pitcher_name": "Off Pitcher",
+        "pitcher_throws": "P-Hand", "park_factor": "Park", "wind_mult": "Wind×",
+        "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
+        "recent_form_score": "Recent Form", "hr_prob_game": "Model HR%",
+        "rationale": "Why they hit"})
+    if "Spot" in show.columns:
+        show["Spot"] = show["Spot"].astype("Int64")
+    if "HR" in show.columns:
+        show["HR"] = show["HR"].astype(int)
+    if "Model HR%" in show.columns:
+        show["Model HR%"] = (show["Model HR%"] * 100).round(0)
+    st.markdown(f"**{len(show)}** home runs shown")
+    st.dataframe(
+        show, hide_index=True, use_container_width=True,
+        height=min(620, 60 + 35 * min(len(show), 16)),
+        column_config={
+            "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
+            "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
+            "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
+            "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
+            "xISO": st.column_config.NumberColumn("xISO", format="%.3f"),
+            "Park": st.column_config.NumberColumn("Park", format="%.0f"),
+            "Wind×": st.column_config.NumberColumn("Wind×", format="%.2f"),
+            "Recent Form": st.column_config.ProgressColumn("Recent Form", min_value=0, max_value=100, format="%.0f"),
+            "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
+            "Why they hit": st.column_config.TextColumn("Why they hit", width="large"),
+        },
+    )
+    st.download_button("⬇️ Export HR stat sheet to CSV", show.to_csv(index=False).encode(),
+                       file_name="hr_stat_sheet.csv", mime="text/csv", key="dl_statsheet")
+
+    with st.expander("🔍 HR detail — pre-game metrics & why they hit", expanded=False):
+        opts = [f"{r['date']} · {r['player']} ({r.get('team','')}) — spot "
+                f"{int(r['lineup_spot']) if pd.notna(r.get('lineup_spot')) else '?'}"
+                for _, r in sheet_sorted.head(150).iterrows()]
+        if opts:
+            pick = st.selectbox("Pick a home run", opts, key="hr_detail_pick")
+            _render_hr_detail(sheet_sorted.head(150).iloc[opts.index(pick)])
+
+
+def tab_previous_hrs(history):
+    (events, _summary, _centroid, _calib, _trend, league_spot, source, _notes,
+     start_iso, end_iso, _half_life) = history
+    st.subheader("📋 Previous HRs & lineup spot")
+    badge = "🟢" if source.startswith("LIVE") else "🟡"
+    st.caption(
+        f"{badge} **{source}** — every home run from **{start_iso} → {end_iso}**, the "
+        "**batting-order spot** it was hit from, the pre-game metrics, and *why* they "
+        "went deep. (Live mode pulls the real lineup spot from each game's box score; "
+        "the demo slate uses modeled spots.)"
+    )
+
+    if league_spot is not None and not league_spot.empty:
+        ls = league_spot.sort_values("lineup_spot")
+        cc1, cc2 = st.columns([2, 1])
+        with cc1:
+            st.altair_chart(
+                alt.Chart(ls).mark_bar(color="#e63946").encode(
+                    x=alt.X("lineup_spot:O", title="Lineup spot"),
+                    y=alt.Y("hr:Q", title="HRs"),
+                    tooltip=["lineup_spot", "hr", "games",
+                             alt.Tooltip("hr_per_game:Q", format=".3f")]
+                ).properties(height=210, title="HRs by lineup spot (window)"),
+                use_container_width=True,
+            )
+        with cc2:
+            top = ls.sort_values("hr", ascending=False).iloc[0]
+            st.metric("Top HR spot", f"#{int(top['lineup_spot'])}", f"{int(top['hr'])} HRs")
+            st.caption("Middle-order spots (3-5) usually lead — exactly why the parlay "
+                       "builder anchors there.")
+
+    render_hr_stat_sheet(events, start_iso, end_iso)
+
+
 def tab_trends(history, projection_slate):
     (events, summary, centroid, calib, trend, league_spot, source, notes,
      start_iso, end_iso, half_life) = history
@@ -598,79 +701,8 @@ def tab_trends(history, projection_slate):
     c2.metric("HR games", summary.get("hr_events"))
     c3.metric("Unique HR hitters", summary.get("unique_hitters"))
     c4.metric("HR games / day", summary.get("hr_per_day"))
-
-    # --- Stat sheet of previous HR hitters (with lineup spot) ---
-    if events is not None and not events.empty:
-        st.markdown("##### 📋 Previous HR hitters — stat sheet (with lineup spot)")
-        st.caption(
-            f"Every home run from **{start_iso} → {end_iso}** with the hitter's "
-            "**lineup spot** and key Statcast marks. Filter and export. (Live mode "
-            "logs real HRs; spot is from the posted lineup when available.)"
-        )
-        sheet = events.copy()
-        if "lineup_spot" in sheet.columns:
-            spot_opts = sorted(int(s) for s in sheet["lineup_spot"].dropna().unique())
-        else:
-            spot_opts = []
-        team_opts = sorted(sheet["team"].dropna().unique()) if "team" in sheet.columns else []
-        fc1, fc2, fc3 = st.columns([1, 1, 1])
-        sel_spots = fc1.multiselect("Lineup spot", spot_opts, default=[])
-        sel_teams = fc2.multiselect("Team", team_opts, default=[])
-        name_q = fc3.text_input("Player contains", "")
-        if sel_spots and "lineup_spot" in sheet.columns:
-            sheet = sheet[sheet["lineup_spot"].isin(sel_spots)]
-        if sel_teams and "team" in sheet.columns:
-            sheet = sheet[sheet["team"].isin(sel_teams)]
-        if name_q:
-            sheet = sheet[sheet["player"].str.contains(name_q, case=False, na=False)]
-
-        sheet_sorted = sheet.sort_values("date", ascending=False)
-        sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
-                                  "hr_count", "pitcher_name", "pitcher_throws", "park_factor",
-                                  "wind_mult", "barrel_pct", "max_ev", "hr_fb", "xiso",
-                                  "recent_form_score", "hr_prob_game", "rationale"]
-                      if c in sheet_sorted.columns]
-        show = sheet_sorted[sheet_cols].rename(columns={
-            "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
-            "lineup_spot": "Spot", "hr_count": "HR", "pitcher_name": "Off Pitcher",
-            "pitcher_throws": "P-Hand", "park_factor": "Park", "wind_mult": "Wind×",
-            "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
-            "recent_form_score": "Recent Form", "hr_prob_game": "Model HR%",
-            "rationale": "Why they hit"})
-        if "Spot" in show.columns:
-            show["Spot"] = show["Spot"].astype("Int64")
-        if "HR" in show.columns:
-            show["HR"] = show["HR"].astype(int)
-        if "Model HR%" in show.columns:
-            show["Model HR%"] = (show["Model HR%"] * 100).round(0)
-        st.markdown(f"**{len(show)}** home runs shown")
-        st.dataframe(
-            show, hide_index=True, use_container_width=True,
-            height=min(560, 60 + 35 * min(len(show), 15)),
-            column_config={
-                "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
-                "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
-                "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
-                "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
-                "xISO": st.column_config.NumberColumn("xISO", format="%.3f"),
-                "Park": st.column_config.NumberColumn("Park", format="%.0f"),
-                "Wind×": st.column_config.NumberColumn("Wind×", format="%.2f"),
-                "Recent Form": st.column_config.ProgressColumn("Recent Form", min_value=0, max_value=100, format="%.0f"),
-                "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
-                "Why they hit": st.column_config.TextColumn("Why they hit", width="large"),
-            },
-        )
-        st.download_button("⬇️ Export HR stat sheet to CSV", show.to_csv(index=False).encode(),
-                           file_name="hr_stat_sheet.csv", mime="text/csv", key="dl_statsheet")
-
-        # Per-HR detail: pre-game metrics + the "why they hit" insight.
-        with st.expander("🔍 HR detail — pre-game metrics & why they hit", expanded=False):
-            opts = [f"{r['date']} · {r['player']} ({r.get('team','')})"
-                    for _, r in sheet_sorted.head(150).iterrows()]
-            if opts:
-                pick = st.selectbox("Pick a home run", opts, key="hr_detail_pick")
-                idx = opts.index(pick)
-                _render_hr_detail(sheet_sorted.head(150).iloc[idx])
+    st.caption("📋 See the **Previous HRs** tab for the full line-by-line HR log "
+               "with each hitter's lineup spot and why they hit.")
 
     st.markdown("##### 🔬 Shared profile of HR hitters vs. all hitters")
     st.caption("How much HR hitters out-index the slate baseline on each metric.")
@@ -1062,10 +1094,11 @@ def main():
     render_top_picks(filtered)
     st.markdown("")
 
-    t1, t2, t3, t4, t5, t6, t7 = st.tabs(
+    t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
          "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
-         "📈 HR Trends & Backtest", "🎰 Parlay Builder", "💎 Value Finder"]
+         "📋 Previous HRs", "📈 HR Trends & Backtest",
+         "🎰 Parlay Builder", "💎 Value Finder"]
     )
     with t1:
         tab_longshots(filtered)
@@ -1076,10 +1109,12 @@ def main():
     with t4:
         tab_all(filtered)
     with t5:
-        tab_trends(history, filtered)
+        tab_previous_hrs(history)
     with t6:
-        tab_parlay(filtered)
+        tab_trends(history, filtered)
     with t7:
+        tab_parlay(filtered)
+    with t8:
         tab_value_finder(filtered)
 
 

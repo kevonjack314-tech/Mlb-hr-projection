@@ -230,3 +230,20 @@ def test_lineup_spot_and_recurring_log(tmp_path, monkeypatch):
     ps = player_spot_hr(slate_hist)
     enriched = attach_spot_signal(df, ps)
     assert "spot_hr_at_current" in enriched.columns
+
+
+def test_boxscore_batting_order_extraction(monkeypatch):
+    """Real lineup spot is recovered from a game's box score (battingOrder//100)."""
+    from src import sources
+    fake = {"teams": {"home": {"players": {
+                "ID100": {"person": {"id": 100}, "battingOrder": "500"},  # 5th
+                "ID101": {"person": {"id": 101}, "battingOrder": "600"},  # 6th
+                "ID102": {"person": {"id": 102}, "battingOrder": "501"},  # sub, 5th
+                "ID103": {"person": {"id": 103}, "battingOrder": None},   # bench
+            }}, "away": {"players": {
+                "ID200": {"person": {"id": 200}, "battingOrder": "100"},  # leadoff
+            }}}}
+    sources.fetch_batting_order_map.cache_clear()
+    monkeypatch.setattr(sources, "_get_json", lambda url, params=None: fake)
+    m = dict(sources.fetch_batting_order_map(12345))
+    assert m == {100: 5, 101: 6, 102: 5, 200: 1}  # bench (103) excluded

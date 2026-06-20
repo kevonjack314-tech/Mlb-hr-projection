@@ -117,6 +117,7 @@ def _simulated_hr_history(start_iso: str, end_iso: str):
 def _live_hr_history(start_iso: str, end_iso: str):
     try:
         from . import statcast as sc_mod
+        from . import sources as src_mod
         if not sc_mod.is_available():
             return None
         import pybaseball as pyb
@@ -131,6 +132,7 @@ def _live_hr_history(start_iso: str, end_iso: str):
         year = dt.date.fromisoformat(end_iso).year
         season = sc_mod.get_season_batter_table(year)
         season_by_id = season.set_index("mlbam_id") if not season.empty else None
+        order_maps: dict = {}   # game_pk -> {player_id: lineup spot} from box scores
 
         rows = []
         for _, r in hr.iterrows():
@@ -140,6 +142,11 @@ def _live_hr_history(start_iso: str, end_iso: str):
             away_abbr = _SAVANT_TEAM_FIX.get(r.get("away_team"), r.get("away_team"))
             # Batter's team: away bats in the top of the inning, home in the bottom.
             batter_team = away_abbr if str(r.get("inning_topbot", "")).startswith("Top") else home_abbr
+            # Real lineup spot from that game's box score (cached per game_pk).
+            gpk = r.get("game_pk")
+            if gpk not in order_maps:
+                order_maps[gpk] = dict(src_mod.fetch_batting_order_map(gpk))
+            spot = order_maps[gpk].get(r.get("batter"))
             prof = {}
             if season_by_id is not None and r.get("batter") in season_by_id.index:
                 srow = season_by_id.loc[r["batter"]]
@@ -158,7 +165,7 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 "bats": stand,
                 "team": batter_team,
                 "home_team": home_abbr,
-                "lineup_spot": None,
+                "lineup_spot": spot,
                 "opponent": away_abbr if batter_team == home_abbr else home_abbr,
                 "pitcher_throws": r.get("p_throws", "R"),
                 "hr_ev": r.get("launch_speed"),

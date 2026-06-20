@@ -154,6 +154,33 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
     return tuple(players[:13])
 
 
+@lru_cache(maxsize=1024)
+def fetch_batting_order_map(game_pk) -> tuple:
+    """Return ((player_id, spot), …) from a game's box score.
+
+    MLB StatsAPI encodes batting order as e.g. "500" (5th spot) or "501" (a sub
+    who took the 5th spot); the lineup spot is the hundreds digit. This lets us
+    recover the *actual* spot each player batted in for a completed game.
+    """
+    if not game_pk:
+        return ()
+    data = _get_json(f"{STATSAPI}/game/{game_pk}/boxscore")
+    out = []
+    try:
+        for side in ("home", "away"):
+            for _key, p in data["teams"][side]["players"].items():
+                bo = p.get("battingOrder")
+                if not bo:
+                    continue
+                spot = int(bo) // 100
+                pid = p.get("person", {}).get("id")
+                if pid and 1 <= spot <= 9:
+                    out.append((pid, spot))
+    except Exception:
+        return ()
+    return tuple(out)
+
+
 @lru_cache(maxsize=64)
 def fetch_weather(home_abbr: str, date_iso: str, hour: int = 19) -> dict:
     """Open-Meteo hourly forecast at the park for the given local hour.
