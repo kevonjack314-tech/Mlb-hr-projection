@@ -533,6 +533,59 @@ def tab_trends(history, projection_slate):
     c3.metric("Unique HR hitters", summary.get("unique_hitters"))
     c4.metric("HR games / day", summary.get("hr_per_day"))
 
+    # --- Stat sheet of previous HR hitters (with lineup spot) ---
+    if events is not None and not events.empty:
+        st.markdown("##### 📋 Previous HR hitters — stat sheet (with lineup spot)")
+        st.caption(
+            f"Every home run from **{start_iso} → {end_iso}** with the hitter's "
+            "**lineup spot** and key Statcast marks. Filter and export. (Live mode "
+            "logs real HRs; spot is from the posted lineup when available.)"
+        )
+        sheet = events.copy()
+        if "lineup_spot" in sheet.columns:
+            spot_opts = sorted(int(s) for s in sheet["lineup_spot"].dropna().unique())
+        else:
+            spot_opts = []
+        team_opts = sorted(sheet["team"].dropna().unique()) if "team" in sheet.columns else []
+        fc1, fc2, fc3 = st.columns([1, 1, 1])
+        sel_spots = fc1.multiselect("Lineup spot", spot_opts, default=[])
+        sel_teams = fc2.multiselect("Team", team_opts, default=[])
+        name_q = fc3.text_input("Player contains", "")
+        if sel_spots and "lineup_spot" in sheet.columns:
+            sheet = sheet[sheet["lineup_spot"].isin(sel_spots)]
+        if sel_teams and "team" in sheet.columns:
+            sheet = sheet[sheet["team"].isin(sel_teams)]
+        if name_q:
+            sheet = sheet[sheet["player"].str.contains(name_q, case=False, na=False)]
+
+        sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
+                                  "hr_count", "barrel_pct", "max_ev", "hr_fb", "xiso",
+                                  "park_factor", "pitcher_name"] if c in sheet.columns]
+        show = sheet.sort_values("date", ascending=False)[sheet_cols].rename(columns={
+            "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
+            "lineup_spot": "Spot", "hr_count": "HR", "barrel_pct": "Barrel%",
+            "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
+            "park_factor": "Park", "pitcher_name": "Off Pitcher"})
+        if "Spot" in show.columns:
+            show["Spot"] = show["Spot"].astype("Int64")
+        if "HR" in show.columns:
+            show["HR"] = show["HR"].astype(int)
+        st.markdown(f"**{len(show)}** home runs shown")
+        st.dataframe(
+            show, hide_index=True, use_container_width=True,
+            height=min(560, 60 + 35 * min(len(show), 15)),
+            column_config={
+                "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
+                "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
+                "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
+                "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
+                "xISO": st.column_config.NumberColumn("xISO", format="%.3f"),
+                "Park": st.column_config.NumberColumn("Park", format="%.0f"),
+            },
+        )
+        st.download_button("⬇️ Export HR stat sheet to CSV", show.to_csv(index=False).encode(),
+                           file_name="hr_stat_sheet.csv", mime="text/csv", key="dl_statsheet")
+
     st.markdown("##### 🔬 Shared profile of HR hitters vs. all hitters")
     st.caption("How much HR hitters out-index the slate baseline on each metric.")
     st.dataframe(summary["metric_table"], hide_index=True, use_container_width=True)

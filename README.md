@@ -60,11 +60,12 @@ keeps the lineup HR log fresh.
 4. **📊 All Combined + Best Metrics** — the master table for the full slate with
    every column, sortable/filterable, plus a Top-20 overall leaderboard.
 5. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
-   (configurable lookback): the *shared profile* of who went deep (how HR hitters
-   out-index the field on barrel%, EV, max EV, park, platoon), **model calibration**
-   (actual vs. predicted HR rate by decile), the hottest HR parks, a **Profile
-   Match %** for today's bats (resemblance to recent HR hitters), and the
-   **Top-5 list in each category**.
+   (configurable lookback): a browsable **stat sheet of previous HR hitters with
+   their lineup spot** (filter by spot/team/player, CSV export), the *shared
+   profile* of who went deep (how HR hitters out-index the field on barrel%, EV,
+   max EV, park, platoon), **model calibration** (actual vs. predicted HR rate by
+   decile), the hottest HR parks, **HRs-by-lineup-spot**, a **Profile Match %** for
+   today's bats, and the **Top-5 list in each category**.
 6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
    ULX formula): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
    bats (underpriced profiles, 6-7), and **🚀 Deep-Space Longshots** (overlooked
