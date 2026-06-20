@@ -171,10 +171,13 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 "hr_ev": r.get("launch_speed"),
                 "hr_la": r.get("launch_angle"),
                 "hr_distance": r.get("hit_distance_sc"),
-                "park_factor": park_hr_multiplier(home_abbr, stand) * 100 if park else 100.0,
+                "hr_count": 1,
                 **prof,
             })
         events_df = pd.DataFrame(rows)
+        # Run the HR hitters' pre-game profiles through the model so the stat
+        # sheet shows the same metrics + "what we'd have rated them" as the demo.
+        events_df = score_slate(events_df)
         # No full scored slate available in the live HR-only pull; calibration
         # falls back to the simulated slate in that mode.
         _, slate_df = _simulated_hr_history(start_iso, end_iso)
