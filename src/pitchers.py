@@ -71,11 +71,25 @@ def _live_hr_by_spot(pitcher_id: int, end_date_iso: str, n_games: int):
         return None
 
 
+def _safe_pid(x):
+    """Coerce a pitcher id to int, or None for missing/NaN (TBD starters)."""
+    try:
+        if x is None:
+            return None
+        xf = float(x)
+        if xf != xf:          # NaN
+            return None
+        return int(xf)
+    except (TypeError, ValueError):
+        return None
+
+
 def pitcher_recent_hr_by_spot(pitcher_id, name: str, end_date_iso: str,
                               n_games: int = 5, prefer_live: bool = True):
     """Return (counts_by_spot: dict, games: int, total_hr: int, source: str)."""
-    if prefer_live and pitcher_id:
-        live = _live_hr_by_spot(int(pitcher_id), end_date_iso, n_games)
+    pid = _safe_pid(pitcher_id)
+    if prefer_live and pid:
+        live = _live_hr_by_spot(pid, end_date_iso, n_games)
         if live is not None:
             return live[0], live[1], live[2], "LIVE"
     counts, n, total = _demo_hr_by_spot(name, end_date_iso, n_games)
@@ -98,9 +112,14 @@ def sp_spot_counts_for(pairs, end_date_iso: str, prefer_live: bool) -> dict:
     so it can be mapped back onto every hitter facing that arm.
     """
     out = {}
-    for game, name, pid in pairs:
-        counts, _n, _t, _src = pitcher_recent_hr_by_spot(
-            pid, name, end_date_iso, 5, prefer_live)
+    for pair in pairs:
+        try:
+            game, name, pid = pair
+            counts, _n, _t, _src = pitcher_recent_hr_by_spot(
+                pid, name, end_date_iso, 5, prefer_live)
+        except Exception:
+            game, name = (pair[0], pair[1]) if len(pair) >= 2 else (pair, None)
+            counts = {s: 0 for s in range(1, 10)}
         out[(game, name)] = counts
     return out
 
