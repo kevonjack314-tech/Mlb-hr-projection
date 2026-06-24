@@ -323,6 +323,7 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
         prof["pitcher_name"] = name
     if throws:
         prof["pitcher_throws"] = throws
+    prof["pitcher_id"] = pitcher_id
     used_real = False
 
     try:

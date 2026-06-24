@@ -59,7 +59,11 @@ keeps the lineup HR log fresh.
    the season line. Each player shows *why* they're sneaky.
 4. **📊 All Combined + Best Metrics** — the master table for the full slate with
    every column, sortable/filterable, plus a Top-20 overall leaderboard.
-5. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
+5. **🧾 Lineups** — today's **batting orders (1–9)** for both teams in each game,
+   next to the **opposing starter's HRs allowed by lineup spot over their last 5
+   games** (an **SP HRs@Spot** column flags which order positions take that pitcher
+   deep). Live from posted lineups + Statcast box scores; updates with the date.
+6. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
    (configurable lookback): a browsable **stat sheet of previous HR hitters with
    their lineup spot** (filter by spot/team/player, CSV export), the *shared
    profile* of who went deep (how HR hitters out-index the field on barrel%, EV,
@@ -341,6 +345,8 @@ modeled slates so the whole analysis runs without network.
 │   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
 │   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
 │   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
+│   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 5 games)
+│   ├── learn.py            # self-calibration: HR rate by model rating
 │   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
 └── .streamlit/config.toml  # dark theme

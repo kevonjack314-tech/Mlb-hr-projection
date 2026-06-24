@@ -247,3 +247,18 @@ def test_boxscore_batting_order_extraction(monkeypatch):
     monkeypatch.setattr(sources, "_get_json", lambda url, params=None: fake)
     m = dict(sources.fetch_batting_order_map(12345))
     assert m == {100: 5, 101: 6, 102: 5, 200: 1}  # bench (103) excluded
+
+
+def test_pitcher_hr_by_spot_demo():
+    from src.pitchers import hottest_spots, pitcher_recent_hr_by_spot
+    counts, n, total, src = pitcher_recent_hr_by_spot(None, "Sonny Gray", "2026-06-20",
+                                                      n_games=5, prefer_live=False)
+    assert src == "modeled" and n == 5
+    assert set(counts) == set(range(1, 10))
+    assert sum(counts.values()) == total          # distribution sums to total HRs
+    # Deterministic for the same (name, date).
+    counts2, *_ = pitcher_recent_hr_by_spot(None, "Sonny Gray", "2026-06-20",
+                                            n_games=5, prefer_live=False)
+    assert counts2 == counts
+    hot = hottest_spots(counts, 2)
+    assert all(1 <= s <= 9 for s in hot)
