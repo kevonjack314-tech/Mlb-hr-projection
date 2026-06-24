@@ -262,3 +262,24 @@ def test_pitcher_hr_by_spot_demo():
     assert counts2 == counts
     hot = hottest_spots(counts, 2)
     assert all(1 <= s <= 9 for s in hot)
+
+
+def test_sp_spot_signal_feeds_parlay():
+    import pandas as pd
+    from src.parlay import role_fit
+    from src.pitchers import attach_sp_spot_signal
+
+    # attach_sp_spot_signal maps (game, pitcher) + lineup spot -> HR count.
+    slate = pd.DataFrame([{"game": "A @ B", "pitcher_name": "X", "lineup_spot": 4},
+                          {"game": "A @ B", "pitcher_name": "X", "lineup_spot": 7}])
+    out = attach_sp_spot_signal(slate, {("A @ B", "X"): {4: 2, 7: 0}})
+    assert out["sp_hr_at_spot"].tolist() == [2, 0]
+
+    # role_fit rewards a bat in a spot the opposing SP gives up HRs to.
+    base = {"hr_score": 60, "sneaky_score": 55, "longshot_score": 55, "edge_pct": 0,
+            "lineup_spot": 4, "spot_hr_rate": float("nan"), "cal_edge_pct": float("nan"),
+            "sp_hr_at_spot": 0}
+    low = pd.Series(base)
+    high = pd.Series({**base, "sp_hr_at_spot": 3})
+    for role in ("Anchor", "Value", "Longshot"):
+        assert role_fit(high, role) > role_fit(low, role)

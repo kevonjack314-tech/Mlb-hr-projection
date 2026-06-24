@@ -39,6 +39,7 @@ from src.lineup import (
 )
 from src.odds import attach_odds, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
+from src.pitchers import attach_sp_spot_signal, sp_spot_counts_for
 from src.sources import get_slate
 
 st.set_page_config(
@@ -96,6 +97,12 @@ def load_scored_slate(date_iso: str, prefer_live: bool):
     df, source, notes = get_slate(game_date, prefer_live=prefer_live)
     scored = score_slate(df)
     return scored, source, notes
+
+
+@st.cache_data(show_spinner="Loading pitcher HR-by-spot…", ttl=60 * 60)
+def load_sp_spot_counts(date_iso: str, prefer_live: bool, pairs: tuple):
+    """Cache {(game, pitcher): HR-by-spot} for the slate's probable starters."""
+    return sp_spot_counts_for(pairs, date_iso, prefer_live)
 
 
 @st.cache_data(show_spinner="Analyzing trailing-month HR history…", ttl=60 * 60)
@@ -159,6 +166,7 @@ GLOSSARY = {
     "Park Factor": "Handedness-aware HR park factor (100 = average; 110 = +10% HR).",
     "Spot": "Batting-order spot (1-9) for this game — live from the posted lineup when available, else estimated. Top-of-order bats get more PAs.",
     "xPA": "Expected plate appearances given the lineup spot (top of order bats more) — feeds the game HR probability.",
+    "SP HRs@Spot": "HRs the opposing starting pitcher has allowed to THIS hitter's lineup spot over their last 5 games — a juicy-spot matchup signal that also boosts the bat in parlay selection.",
     "HRs@Spot": "HRs this hitter has hit from today's lineup spot in the recurring HR-by-spot log (data before the selected date).",
     "HR/G@Spot": "HR per game this hitter has produced from today's lineup spot (recurring log) — a parlay role-fit nudge.",
     "Profile Match": "How closely a hitter resembles the trailing-month HR-hitter profile (barrel%, EV, max EV, launch angle, park) — 100 = a dead-ringer for recent HR hitters.",
@@ -331,6 +339,7 @@ DISPLAY_COLUMNS = {
     "vs_os": "vs OS",
     "hr_per_pa": "HR/PA",
     "expected_pa": "xPA",
+    "sp_hr_at_spot": "SP HRs@Spot",
     "spot_hr_at_current": "HRs@Spot",
     "spot_hr_rate": "HR/G@Spot",
     "park_factor": "Park Factor",
@@ -349,7 +358,7 @@ ESSENTIAL_KEYS = {
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
-    "barrel_pct", "max_ev", "park_factor", "role",
+    "barrel_pct", "max_ev", "park_factor", "role", "sp_hr_at_spot",
     "rationale", "sneaky_reasons",
 }
 
@@ -409,6 +418,7 @@ COLUMN_CONFIG = {
     "Park Factor": st.column_config.NumberColumn("Park Factor", help=GLOSSARY["Park Factor"], format="%.0f"),
     "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
     "xPA": st.column_config.NumberColumn("xPA", help=GLOSSARY["xPA"], format="%.1f"),
+    "SP HRs@Spot": st.column_config.NumberColumn("SP HRs@Spot", help=GLOSSARY["SP HRs@Spot"], format="%d"),
     "HRs@Spot": st.column_config.NumberColumn("HRs@Spot", help=GLOSSARY["HRs@Spot"], format="%d"),
     "HR/G@Spot": st.column_config.NumberColumn("HR/G@Spot", help=GLOSSARY["HR/G@Spot"], format="%.2f"),
     "Recent Form": st.column_config.ProgressColumn(
@@ -501,10 +511,10 @@ def tab_longshots(df: pd.DataFrame):
     leaderboard_cards(df, "longshot_score", "Longshot", n=6)
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
-    cols = ["player", "team", "opponent", "pitcher_name", "bats", "longshot_score",
-            "hr_prob_game", "book_odds", "edge_pct", "max_ev", "barrel_pct", "brl_pa",
-            "fb_pct", "hr_fb", "pull_pct", "whiff_pct", "park_factor",
-            "wind_mult", "rationale"]
+    cols = ["player", "team", "opponent", "pitcher_name", "bats", "lineup_spot",
+            "longshot_score", "hr_prob_game", "book_odds", "edge_pct", "sp_hr_at_spot",
+            "max_ev", "barrel_pct", "brl_pa", "fb_pct", "hr_fb", "pull_pct",
+            "whiff_pct", "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
 
@@ -535,9 +545,9 @@ def tab_sneaky(df: pd.DataFrame):
     sneaky = sneaky if not sneaky.empty else df
     leaderboard_cards(sneaky, "sneaky_score", "Sneaky", n=6)
     st.markdown("##### Why they're sneaky")
-    cols = ["player", "team", "opponent", "pitcher_name", "sneaky_score",
-            "hr_prob_game", "form_gap", "hr_minus_xhr", "pitch_matchup_score",
-            "park_factor", "wind_mult", "barrel_pct", "sneaky_reasons"]
+    cols = ["player", "team", "opponent", "pitcher_name", "lineup_spot", "sneaky_score",
+            "hr_prob_game", "sp_hr_at_spot", "form_gap", "hr_minus_xhr",
+            "pitch_matchup_score", "park_factor", "wind_mult", "barrel_pct", "sneaky_reasons"]
     render_table(sneaky.sort_values("sneaky_score", ascending=False).head(40),
                  cols, "Sneaky", "sneaky")
 
@@ -914,6 +924,9 @@ def _render_parlay(result, stake):
                 spot = leg.get("lineup_spot")
                 spot_txt = f"bats {int(spot)}" if pd.notna(spot) else ""
                 st.caption(f"_{leg['archetype']}_ · {spot_txt} · {leg.get('rationale','')}")
+                sp = leg.get("sp_hr_at_spot")
+                if pd.notna(sp) and sp and sp > 0:
+                    st.caption(f"🎯 SP allowed **{int(sp)} HR** to the {int(spot)}-spot (last 5)")
 
     # Combined ticket.
     st.markdown("### 🎟️ The Ticket")
@@ -1252,6 +1265,14 @@ def main():
     scored = add_profile_similarity(scored, centroid)
     scored = attach_spot_signal(scored, player_spot)
     scored = attach_calibrated_prob(scored, score_curve)   # learn from past ratings
+    # Opposing-starter HRs allowed by lineup spot (last 5 games) -> per hitter.
+    _has_pid = "pitcher_id" in scored.columns
+    _pairs = tuple(
+        (game, name, (grp["pitcher_id"].iloc[0] if _has_pid else None))
+        for (game, name), grp in scored.groupby(["game", "pitcher_name"])
+    )
+    sp_counts = load_sp_spot_counts(end_iso, prefer_live, _pairs)
+    scored = attach_sp_spot_signal(scored, sp_counts)
     scored = attach_odds(scored, end_iso, use_live=live_odds)
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)

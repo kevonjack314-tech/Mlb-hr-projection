@@ -89,6 +89,9 @@ when available, else estimated. It feeds the model three ways:
   into the per-game HR probability.
 - **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
   Longshots to 7-9, and checks "different lineup spots".
+- **SP HRs@Spot** — each hitter is tagged with how many HRs the opposing starter
+  has allowed to *their* lineup spot over his last 5 games; bats in a vulnerable
+  spot get a parlay role-fit boost (and the count shows on leg cards & tables).
 - **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
   hitter-day (date, player, spot, HR), de-duped, growing as the date advances. A
   **seed log (~30 days)** ships in the repo so there's history out of the box, and
