@@ -88,3 +88,35 @@ def hottest_spots(counts: dict, top: int = 2) -> list[int]:
         return []
     return [s for s, _ in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
             if counts[s] > 0]
+
+
+def sp_spot_counts_for(pairs, end_date_iso: str, prefer_live: bool) -> dict:
+    """Build {(game, pitcher_name): counts_by_spot} for a list of probable starters.
+
+    `pairs` is an iterable of (game, pitcher_name, pitcher_id). Each pitcher's
+    HR-allowed-by-spot (last 5 games) is computed once and keyed by (game, name)
+    so it can be mapped back onto every hitter facing that arm.
+    """
+    out = {}
+    for game, name, pid in pairs:
+        counts, _n, _t, _src = pitcher_recent_hr_by_spot(
+            pid, name, end_date_iso, 5, prefer_live)
+        out[(game, name)] = counts
+    return out
+
+
+def attach_sp_spot_signal(slate, counts_map: dict):
+    """Add `sp_hr_at_spot`: HRs the opposing starter allowed to each hitter's
+    lineup spot over their last 5 games (0 when unknown)."""
+    import pandas as pd
+    slate = slate.copy()
+
+    def lookup(row):
+        counts = counts_map.get((row.get("game"), row.get("pitcher_name")))
+        spot = row.get("lineup_spot")
+        if not counts or not pd.notna(spot):
+            return 0
+        return int(counts.get(int(spot), 0))
+
+    slate["sp_hr_at_spot"] = slate.apply(lookup, axis=1)
+    return slate

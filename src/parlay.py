@@ -94,6 +94,11 @@ def role_fit(row: pd.Series, role: str) -> float:
     cal = row.get("cal_edge_pct")
     cal_bonus = float(min(6.0, max(0.0, cal))) if pd.notna(cal) else 0.0
     hist_bonus += cal_bonus
+    # Opposing-starter matchup: HRs that pitcher allowed to THIS lineup spot over
+    # their last 5 games — a juicy-spot signal. ~2.3 pts per HR, capped at 7.
+    sp = row.get("sp_hr_at_spot")
+    if pd.notna(sp):
+        hist_bonus += float(min(7.0, float(sp) * 2.3))
     if role == "Anchor":
         return float(row.get("hr_score", 0)) + spot_bonus + hist_bonus
     if role == "Value":
