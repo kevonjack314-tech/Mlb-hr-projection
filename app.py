@@ -1124,6 +1124,81 @@ def render_top_picks(df):
                    names, s.get("light", ""), f"model win {s.get('model_prob','—')}%")
 
 
+def _pitcher_spot_card(pitcher_name, pitcher_id, end_iso, prefer_live):
+    """Opposing starter's HRs allowed by lineup spot (last 5). Returns counts dict."""
+    from src.pitchers import hottest_spots, pitcher_recent_hr_by_spot
+    counts, n, total, src = pitcher_recent_hr_by_spot(
+        pitcher_id, pitcher_name, end_iso, 5, prefer_live)
+    badge = "🟢 real" if src == "LIVE" else "🟡 modeled"
+    st.markdown(f"**Opposing SP: {pitcher_name or '—'}**")
+    st.caption(f"HRs allowed by lineup spot · last {n} games · {total} HR ({badge})")
+    cdf = pd.DataFrame({"Spot": list(counts), "HRs": list(counts.values())})
+    st.altair_chart(
+        alt.Chart(cdf).mark_bar(color="#e63946").encode(
+            x=alt.X("Spot:O", title="Lineup spot"),
+            y=alt.Y("HRs:Q", title="HRs allowed"),
+            tooltip=["Spot", "HRs"]).properties(height=150),
+        use_container_width=True,
+    )
+    hot = hottest_spots(counts, 2)
+    if hot:
+        st.caption("🎯 Most vulnerable to spots " + ", ".join(f"**#{s}**" for s in hot))
+    return counts
+
+
+def _lineup_table(sub, opp_counts):
+    t = sub[["lineup_spot", "player", "position", "hr_prob_game"]].copy()
+    t["pit"] = t["lineup_spot"].map(
+        lambda s: opp_counts.get(int(s), 0) if pd.notna(s) else 0)
+    t["lineup_spot"] = t["lineup_spot"].astype("Int64")
+    t["hr_prob_game"] = (t["hr_prob_game"] * 100).round(0)
+    t = t.rename(columns={"lineup_spot": "Spot", "player": "Player",
+                          "position": "Pos", "hr_prob_game": "Model HR%",
+                          "pit": "SP HRs@Spot"})
+    st.dataframe(
+        t, hide_index=True, use_container_width=True, height=380,
+        column_config={
+            "Spot": st.column_config.NumberColumn("Spot", format="%d"),
+            "Model HR%": st.column_config.NumberColumn("Model HR%", format="%.0f%%"),
+            "SP HRs@Spot": st.column_config.NumberColumn(
+                "SP HRs@Spot",
+                help="HRs the opposing starter has allowed to THIS lineup spot over "
+                     "their last 5 games — higher = a juicier spot to target.",
+                format="%d"),
+        },
+    )
+
+
+def tab_lineups(df, end_iso, prefer_live):
+    st.subheader("🧾 Lineups & Pitcher HR Spots")
+    st.caption(
+        "Today's batting orders (1–9) for both teams in each game, next to the "
+        "**opposing starter's HRs allowed by lineup spot over their last 5 games**. "
+        "The **SP HRs@Spot** column flags which order positions have taken that "
+        "pitcher deep. Updates with the selected date. *(Live mode uses posted "
+        "lineups + real Statcast; demo uses modeled orders.)*"
+    )
+    games = sorted(df["game"].unique())
+    game = st.selectbox("Game", games, key="lu_game")
+    g = df[df["game"] == game]
+    is_home = g["is_home"].astype(bool)
+    away = g[~is_home].dropna(subset=["lineup_spot"]).sort_values("lineup_spot")
+    home = g[is_home].dropna(subset=["lineup_spot"]).sort_values("lineup_spot")
+
+    c1, c2 = st.columns(2)
+    for col, sub in ((c1, away), (c2, home)):
+        with col:
+            if sub.empty:
+                st.info("Lineup not posted yet.")
+                continue
+            team = sub["team"].iloc[0]
+            side = "home" if bool(sub["is_home"].iloc[0]) else "away"
+            st.markdown(f"### {team} ({side})")
+            pid = sub["pitcher_id"].iloc[0] if "pitcher_id" in sub.columns else None
+            counts = _pitcher_spot_card(sub["pitcher_name"].iloc[0], pid, end_iso, prefer_live)
+            _lineup_table(sub, counts)
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
@@ -1193,10 +1268,10 @@ def main():
     render_top_picks(filtered)
     st.markdown("")
 
-    t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(
+    t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs(
         ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
          "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
-         "📋 Previous HRs", "📈 HR Trends & Backtest",
+         "🧾 Lineups", "📋 Previous HRs", "📈 HR Trends & Backtest",
          "🎰 Parlay Builder", "💎 Value Finder"]
     )
     with t1:
@@ -1208,12 +1283,14 @@ def main():
     with t4:
         tab_all(filtered)
     with t5:
-        tab_previous_hrs(history)
+        tab_lineups(filtered, end_iso, prefer_live)
     with t6:
-        tab_trends(history, filtered)
+        tab_previous_hrs(history)
     with t7:
-        tab_parlay(filtered)
+        tab_trends(history, filtered)
     with t8:
+        tab_parlay(filtered)
+    with t9:
         tab_value_finder(filtered)
 
 
