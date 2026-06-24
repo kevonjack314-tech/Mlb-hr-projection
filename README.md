@@ -105,6 +105,16 @@ when available, else estimated. It feeds the model three ways:
   log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
   3–4 — exactly where real middle-of-the-order power lives.)
 
+### Featured picks
+
+- **🔒 HR of the Day** — a single highest-**confidence** lock at the top of the page,
+  blending HR probability, the model rating, floor (consistency), resemblance to
+  recent HR hitters, the opposing starter's vulnerable spot, and the
+  self-calibration edge, with a "why we're confident" rationale.
+- The **🎰 Parlay Builder** has a **🎲 Generate / shuffle** button that re-rolls among
+  the top candidates per role, so you can mix up the legs and get a fresh valid
+  ticket each click (the leg count & strategy still apply).
+
 ### HR odds
 
 Every hitter gets **Book Odds** to hit ≥1 HR: **live** from a sportsbook (The Odds

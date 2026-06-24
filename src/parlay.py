@@ -27,6 +27,8 @@ odds, model true probability, and EV computed from the book odds in odds.py.
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import pandas as pd
 
@@ -115,26 +117,41 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _pick(pool: pd.DataFrame, used_games: set, used_arch: set,
-          max_per_game: int, diversify_arch: bool):
-    """Pick the best-fit row honoring game/archetype diversification, relaxing
-    the archetype rule (then the game rule) only if nothing else qualifies."""
+          max_per_game: int, diversify_arch: bool, rng=None, topk: int = 4):
+    """Pick a strong-fit row honoring game/archetype diversification, relaxing the
+    archetype rule (then the game rule) only if nothing else qualifies.
+
+    With `rng` set (shuffle mode), pick at random among the top-`topk` qualifying
+    candidates instead of always the single best — for variety without quality loss.
+    """
     if pool.empty:
         return None
     for relax_arch in (False, True) if diversify_arch else (True,):
         for relax_game in (False, True):
+            cands = []
             for _, row in pool.iterrows():
                 if not relax_game and row["game"] in used_games:
                     continue
                 if not relax_arch and row["archetype"] in used_arch:
                     continue
-                return row
+                cands.append(row)
+                if rng is None or len(cands) >= topk:
+                    break
+            if cands:
+                return cands[rng.randrange(len(cands))] if rng is not None else cands[0]
     return None
 
 
 def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "ulx",
-                    max_per_game: int = 1, diversify_arch: bool = True) -> dict:
-    """Build a parlay. Returns {legs: DataFrame, summary: dict, checklist: list}."""
+                    max_per_game: int = 1, diversify_arch: bool = True,
+                    seed: int | None = None) -> dict:
+    """Build a parlay. Returns {legs: DataFrame, summary: dict, checklist: list}.
+
+    Pass `seed` (shuffle mode) to re-roll among the top candidates per role and
+    produce a different valid ticket each time.
+    """
     n_legs = int(np.clip(n_legs, 1, 5))
+    rng = random.Random(seed) if seed is not None else None
     df = enrich(df)
 
     legs: list[pd.Series] = []
@@ -157,12 +174,12 @@ def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "ulx",
             if not pool.empty:
                 pool = pool.assign(_fit=pool.apply(lambda r: role_fit(r, role), axis=1)) \
                            .sort_values("_fit", ascending=False)
-            row = _pick(pool, used_games, used_arch, max_per_game, diversify_arch)
+            row = _pick(pool, used_games, used_arch, max_per_game, diversify_arch, rng)
             if row is None:  # fall back to any remaining role-eligible bat
                 pool2 = df[~df["player"].isin(used_players)].assign(
                     _fit=df[~df["player"].isin(used_players)].apply(
                         lambda r: role_fit(r, role), axis=1)).sort_values("_fit", ascending=False)
-                row = _pick(pool2, used_games, used_arch, max_per_game, diversify_arch)
+                row = _pick(pool2, used_games, used_arch, max_per_game, diversify_arch, rng)
             if row is not None:
                 take(row, row.get("role") or role)
     else:
@@ -179,7 +196,7 @@ def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "ulx",
             ranked = df.sort_values("hr_score", ascending=False)
         while len(legs) < n_legs:
             pool = ranked[~ranked["player"].isin(used_players)]
-            row = _pick(pool, used_games, used_arch, max_per_game, diversify_arch)
+            row = _pick(pool, used_games, used_arch, max_per_game, diversify_arch, rng)
             if row is None:
                 break
             rl = row.get("role")
