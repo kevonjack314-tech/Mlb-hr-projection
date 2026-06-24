@@ -264,6 +264,19 @@ def test_pitcher_hr_by_spot_demo():
     assert all(1 <= s <= 9 for s in hot)
 
 
+def test_pitcher_id_handles_missing_and_nan():
+    """A TBD starter (NaN/None id) must not crash the live pitcher lookup."""
+    import numpy as np
+    from src.pitchers import _safe_pid, pitcher_recent_hr_by_spot, sp_spot_counts_for
+    assert _safe_pid(np.nan) is None and _safe_pid(None) is None
+    assert _safe_pid(543037.0) == 543037 and _safe_pid("592450") == 592450
+    # NaN id with prefer_live=True falls back to modeled instead of raising.
+    _c, _n, _t, src = pitcher_recent_hr_by_spot(np.nan, "TBD", "2026-06-24", 5, True)
+    assert src == "modeled"
+    m = sp_spot_counts_for((("A @ B", "TBD", np.nan),), "2026-06-24", True)
+    assert ("A @ B", "TBD") in m
+
+
 def test_sp_spot_signal_feeds_parlay():
     import pandas as pd
     from src.parlay import role_fit
