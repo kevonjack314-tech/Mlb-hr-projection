@@ -283,3 +283,23 @@ def test_sp_spot_signal_feeds_parlay():
     high = pd.Series({**base, "sp_hr_at_spot": 3})
     for role in ("Anchor", "Value", "Longshot"):
         assert role_fit(high, role) > role_fit(low, role)
+
+
+def test_hr_of_day_and_parlay_shuffle():
+    import app
+    from src.odds import attach_odds
+    from src.parlay import generate_parlay
+
+    df = attach_odds(_slate(), "2026-06-18", use_live=False)
+    # HR of the Day: a single high-confidence lock.
+    row = app.hr_of_the_day(df)
+    assert row is not None and 0 <= row["confidence"] <= 100
+
+    # Shuffle (seeded) produces multiple distinct valid tickets.
+    combos = {tuple(generate_parlay(df, 3, "ulx", seed=s)["legs"]["player"])
+              for s in range(8)}
+    assert len(combos) >= 2
+    # Default (no seed) is deterministic.
+    a = tuple(generate_parlay(df, 3, "ulx")["legs"]["player"])
+    b = tuple(generate_parlay(df, 3, "ulx")["legs"]["player"])
+    assert a == b

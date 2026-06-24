@@ -980,10 +980,19 @@ def tab_parlay(df):
     )
     max_per_game = c3.selectbox("Max bats / game", [1, 2], index=0)
     stake = c4.number_input("Stake ($)", min_value=1.0, value=10.0, step=5.0)
-    diversify = st.checkbox("Diversify archetypes (avoid same-profile stacking)", value=True)
 
+    b1, b2 = st.columns([1, 3])
+    if b1.button("🎲 Generate / shuffle legs", use_container_width=True):
+        st.session_state["parlay_seed"] = st.session_state.get("parlay_seed", 0) + 1
+    diversify = b2.checkbox("Diversify archetypes (avoid same-profile stacking)", value=True)
+
+    seed = st.session_state.get("parlay_seed", 0)
+    if seed:
+        st.caption(f"🎲 Shuffle #{seed} — re-rolls among the top candidates per role. "
+                   "Click again for a fresh mix; the leg slider/strategy still apply.")
     result = generate_parlay(df, n_legs=n_legs, strategy=strategy,
-                             max_per_game=int(max_per_game), diversify_arch=diversify)
+                             max_per_game=int(max_per_game), diversify_arch=diversify,
+                             seed=(seed or None))
     _render_parlay(result, stake)
 
     st.markdown("---")
@@ -1102,6 +1111,67 @@ def _pick_card(label, name, sub, big, extra=""):
         f"<div class='big'>{big}</div><div class='sub'>{extra}</div></div>",
         unsafe_allow_html=True,
     )
+
+
+def _col(d, name, default):
+    return d[name].fillna(default) if name in d.columns else pd.Series(default, index=d.index)
+
+
+def hr_of_the_day(df):
+    """The single highest-CONFIDENCE HR lock — blends probability, model rating,
+    floor (consistency), resemblance to recent HR hitters, the opposing SP's
+    vulnerable spot, and the self-calibration edge."""
+    if df is None or df.empty:
+        return None
+    d = df.copy()
+    prob = (_col(d, "hr_prob_game", 0) * 330).clip(0, 100)        # 0.30 -> ~99
+    base = (0.30 * prob + 0.24 * _col(d, "hr_score", 0)
+            + 0.22 * _col(d, "consistency_score", 50)
+            + 0.24 * _col(d, "profile_match", 50))
+    bonus = (_col(d, "sp_hr_at_spot", 0).clip(0, 4) * 2.5
+             + _col(d, "cal_edge_pct", 0).clip(lower=0))
+    d["confidence"] = (base + bonus).clip(0, 100)
+    return d.sort_values("confidence", ascending=False).iloc[0]
+
+
+def render_hr_of_day(df):
+    """Featured banner for the highest-confidence HR pick of the day."""
+    row = hr_of_the_day(df)
+    if row is None:
+        return
+    spot = row.get("lineup_spot")
+    spot_txt = f"batting {int(spot)}" if pd.notna(spot) else ""
+    cal = row.get("calibrated_hr_prob")
+    cal_txt = f" · calibrated {cal*100:.0f}%" if pd.notna(cal) else ""
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 2])
+        with c1:
+            st.markdown(f"### 🔒 HR of the Day — **{row['player']}**")
+            st.markdown(
+                f"**{row['team']} vs {row['opponent']}** · {spot_txt} · "
+                f"vs {row.get('pitcher_throws','R')}HP {row.get('pitcher_name','—')} · "
+                f"**{format_american(row.get('book_odds'))}**"
+            )
+            reasons = []
+            if row.get("rationale"):
+                reasons.append(row["rationale"])
+            if pd.notna(row.get("profile_match")) and row["profile_match"] >= 55:
+                reasons.append(f"matches recent HR hitters ({row['profile_match']:.0f}% profile)")
+            sp = row.get("sp_hr_at_spot")
+            if pd.notna(sp) and sp and sp > 0 and pd.notna(spot):
+                reasons.append(f"SP gave up {int(sp)} HR to the {int(spot)}-spot (last 5)")
+            if pd.notna(row.get("hr_rate_7")) and row["hr_rate_7"] > 0.04:
+                reasons.append("hot over the last 7 days")
+            if row.get("consistency_score", 0) >= 65:
+                reasons.append("high floor / steady hard contact")
+            st.markdown("**Why we're confident:** " + "; ".join(reasons[:4]) + ".")
+        with c2:
+            m1, m2 = st.columns(2)
+            m1.metric("Confidence", f"{row['confidence']:.0f}/100")
+            m2.metric("Model HR%", f"{row['hr_prob_game']*100:.0f}%")
+            st.caption(f"HR Score {row.get('hr_score',0):.0f} · Consistency "
+                       f"{row.get('consistency_score',0):.0f}{cal_txt}")
+            st.progress(min(1.0, float(row["confidence"]) / 100.0))
 
 
 def render_top_picks(df):
@@ -1286,6 +1356,8 @@ def main():
     st.markdown(f"**{len(filtered)}** hitters · **{filtered['game'].nunique()}** games · "
                 f"HR odds: {odds_badge}")
 
+    render_hr_of_day(filtered)
+    st.markdown("")
     render_top_picks(filtered)
     st.markdown("")
 
