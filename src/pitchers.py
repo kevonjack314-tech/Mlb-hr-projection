@@ -122,7 +122,7 @@ def sp_spot_counts_for(pairs, end_date_iso: str, prefer_live: bool) -> dict:
     """Build {(game, pitcher_name): counts_by_spot} for a list of probable starters.
 
     `pairs` is an iterable of (game, pitcher_name, pitcher_id). Each pitcher's
-    HR-allowed-by-spot (last 5 games) is computed once and keyed by (game, name)
+    HR-allowed-by-spot (last 10 games) is computed once and keyed by (game, name)
     so it can be mapped back onto every hitter facing that arm.
     """
     out = {}
@@ -130,7 +130,7 @@ def sp_spot_counts_for(pairs, end_date_iso: str, prefer_live: bool) -> dict:
         try:
             game, name, pid = pair
             counts, _n, _t, _src = pitcher_recent_hr_by_spot(
-                pid, name, end_date_iso, 5, prefer_live)
+                pid, name, end_date_iso, 10, prefer_live)
         except Exception:
             game, name = (pair[0], pair[1]) if len(pair) >= 2 else (pair, None)
             counts = {s: 0 for s in range(1, 10)}
@@ -140,7 +140,7 @@ def sp_spot_counts_for(pairs, end_date_iso: str, prefer_live: bool) -> dict:
 
 def attach_sp_spot_signal(slate, counts_map: dict):
     """Add `sp_hr_at_spot`: HRs the opposing starter allowed to each hitter's
-    lineup spot over their last 5 games (0 when unknown)."""
+    lineup spot over their last 10 games (0 when unknown)."""
     import pandas as pd
     slate = slate.copy()
 

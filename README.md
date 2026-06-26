@@ -60,10 +60,9 @@ keeps the lineup HR log fresh.
 4. **📊 All Combined + Best Metrics** — the master table for the full slate with
    every column, sortable/filterable, plus a Top-20 overall leaderboard.
 5. **🧾 Lineups** — today's **batting orders (1–9)** for both teams in each game,
-   next to the **opposing starter's HRs allowed by lineup spot over their last 5
-   *and* last 10 games** (grouped bars + an **SP HRs@Spot** column flagging which
-   order positions take that pitcher deep). Live from posted lineups + Statcast
-   box scores; updates with the date.
+   next to the **opposing starter's HRs allowed by lineup spot over their last 10
+   games** (an **SP HRs@Spot** column flags which order positions take that pitcher
+   deep). Live from posted lineups + Statcast box scores; updates with the date.
 6. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
    (configurable lookback): a browsable **stat sheet of previous HR hitters with
    their lineup spot** (filter by spot/team/player, CSV export), the *shared
@@ -91,7 +90,7 @@ when available, else estimated. It feeds the model three ways:
 - **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
   Longshots to 7-9, and checks "different lineup spots".
 - **SP HRs@Spot** — each hitter is tagged with how many HRs the opposing starter
-  has allowed to *their* lineup spot over his last 5 games; bats in a vulnerable
+  has allowed to *their* lineup spot over his last 10 games; bats in a vulnerable
   spot get a parlay role-fit boost (and the count shows on leg cards & tables).
 - **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
   hitter-day (date, player, spot, HR), de-duped, growing as the date advances. A
@@ -359,7 +358,7 @@ modeled slates so the whole analysis runs without network.
 │   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
 │   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
 │   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
-│   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 5 games)
+│   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 10 games)
 │   ├── learn.py            # self-calibration: HR rate by model rating
 │   ├── history.py          # trailing-month HR backtest, profile match, top-5
 │   └── sources.py          # live MLB StatsAPI + Open-Meteo, merges real metrics
