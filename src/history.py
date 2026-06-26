@@ -142,7 +142,11 @@ def _live_hr_history(start_iso: str, end_iso: str):
         d = end
         while d >= start:
             for g in src_mod.fetch_schedule(d.isoformat()):
-                for hr in src_mod.fetch_game_box_hrs(g.get("game_pk")):
+                gpk = g.get("game_pk")
+                # Prefer play-by-play (the actual pitcher per HR); fall back to the
+                # box score (opposing starter) if the feed isn't available.
+                hrs = src_mod.fetch_game_hr_details(gpk) or src_mod.fetch_game_box_hrs(gpk)
+                for hr in hrs:
                     row = dict(hr)
                     row["date"] = d.isoformat()
                     rows.append(row)
@@ -151,6 +155,13 @@ def _live_hr_history(start_iso: str, end_iso: str):
             return None
 
         events_df = pd.DataFrame(rows)
+        # Combine multiple HRs by the same batter off the same pitcher in a game.
+        gcols = [c for c in ["date", "player", "mlbam_id", "team", "opponent",
+                             "home_team", "is_home", "lineup_spot", "pitcher_name"]
+                 if c in events_df.columns]
+        if "hr_count" in events_df.columns and gcols:
+            events_df = (events_df.groupby(gcols, dropna=False, as_index=False)["hr_count"]
+                         .sum())
         # Enrich with season batted-ball metrics by MLBAM id (cached pull).
         try:
             season = sc_mod.get_season_batter_table(end.year)
