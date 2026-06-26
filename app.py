@@ -43,20 +43,20 @@ from src.pitchers import attach_sp_spot_signal, sp_spot_counts_for
 from src.sources import get_slate
 
 st.set_page_config(
-    page_title="MLB HR Projection Tool",
+    page_title="HR Hunter",
     page_icon="⚾",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # auto-collapses on phones for a full-screen feel
 )
 
 
 def inject_css():
-    """A little visual polish: tighter headers, nicer cards, role-badge colors."""
+    """Visual polish + a mobile-app feel (responsive layout, sticky scroll tabs)."""
     st.markdown(
         """
         <style>
-          #MainMenu, footer {visibility: hidden;}
-          .block-container {padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1400px;}
+          #MainMenu, footer, [data-testid="stToolbar"] {visibility: hidden;}
+          .block-container {padding-top: 1.6rem; padding-bottom: 4rem; max-width: 1400px;}
           h1 {font-weight: 800; letter-spacing: -0.5px;}
           /* Metric cards */
           [data-testid="stMetric"] {
@@ -68,11 +68,20 @@ def inject_css():
           div[data-testid="stVerticalBlockBorderWrapper"] {
             border-radius: 14px; border-color: #232a38 !important;
           }
-          /* Tabs: bigger, pill-like, with a red active underline */
-          button[data-baseweb="tab"] {font-size: 0.98rem; font-weight: 600;}
+          /* Tabs: pill-like, horizontally scrollable, sticky at the top */
+          .stTabs [data-baseweb="tab-list"] {
+            position: sticky; top: 0; z-index: 99; background: #0e1117;
+            overflow-x: auto; scrollbar-width: none; gap: 2px;
+            padding-bottom: 4px; scroll-snap-type: x proximity;
+          }
+          .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {display: none;}
+          button[data-baseweb="tab"] {
+            font-size: 0.95rem; font-weight: 600; white-space: nowrap;
+            scroll-snap-align: start;
+          }
           .stTabs [aria-selected="true"] {color: #ff5864 !important;}
-          /* Buttons */
-          .stDownloadButton button, .stButton button {border-radius: 10px;}
+          /* Buttons: big tap targets */
+          .stDownloadButton button, .stButton button {border-radius: 10px; min-height: 42px;}
           /* Hero pick cards */
           .pickcard {background: linear-gradient(160deg,#1b2230,#141923);
             border: 1px solid #2a3346; border-radius: 16px; padding: 16px 18px; height: 100%;}
@@ -82,6 +91,22 @@ def inject_css():
           .pickcard .big {font-size:1.5rem; font-weight:800; color:#ff5864;}
           .role-pill {display:inline-block; padding:2px 9px; border-radius:999px;
             font-size:.72rem; font-weight:700; margin-right:6px;}
+
+          /* ---- Mobile (phones) ---- */
+          @media (max-width: 640px) {
+            .block-container {padding: 1rem 0.7rem 4.5rem !important;}
+            h1 {font-size: 1.7rem !important; line-height: 1.15;}
+            h2 {font-size: 1.25rem !important;}
+            h3 {font-size: 1.08rem !important;}
+            [data-testid="stMetricValue"] {font-size: 1.35rem !important;}
+            button[data-baseweb="tab"] {font-size: 0.9rem; padding: 6px 10px !important;}
+            .pickcard {padding: 13px 14px; border-radius: 14px;}
+            .pickcard .name {font-size: 1.05rem;}
+            .pickcard .big {font-size: 1.3rem;}
+            /* tighten dataframes + make controls full width */
+            .stButton button, .stDownloadButton button {width: 100%;}
+            .stSlider, .stSelectbox, .stMultiSelect {margin-bottom: .2rem;}
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1306,6 +1331,10 @@ def main():
             "been homering and why.\n"
             "5. Toggle **✨ Simple view** off (sidebar) to see every advanced metric, "
             "and hover any column header for a plain-language definition.\n\n"
+            "📲 **Install it like an app:** open this page in your phone browser → "
+            "**Share / ⋮ menu → Add to Home Screen**. It then launches full-screen "
+            "with an icon, just like a native app.\n\n"
+            "_Tip: tap the **»** (top-left) to open the date picker & settings._\n\n"
             "_Projections are model estimates for research/entertainment — not betting advice._"
         )
 
