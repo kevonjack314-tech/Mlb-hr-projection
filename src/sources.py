@@ -182,6 +182,56 @@ def fetch_batting_order_map(game_pk) -> tuple:
 
 
 @lru_cache(maxsize=2048)
+def fetch_game_hr_details(game_pk) -> tuple:
+    """Real HRs from a game's play-by-play feed — the ACTUAL pitcher per HR.
+
+    Returns one dict per home run: batter (name+id), the exact pitcher who gave
+    it up, batting team / opponent, and the batter's lineup spot (from the same
+    feed's box score). This is accurate even when a hitter homers off multiple
+    pitchers in a game.
+    """
+    if not game_pk:
+        return ()
+    data = _get_json(f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live")
+    if not data:
+        return ()
+    out = []
+    try:
+        gteams = data["gameData"]["teams"]
+        home_abbr = _TEAM_ID_TO_ABBR.get(gteams["home"]["id"])
+        away_abbr = _TEAM_ID_TO_ABBR.get(gteams["away"]["id"])
+        box = data["liveData"]["boxscore"]["teams"]
+        spot_by_id = {}
+        for side in ("home", "away"):
+            for _k, p in box[side]["players"].items():
+                bo = p.get("battingOrder")
+                if bo:
+                    spot_by_id[p.get("person", {}).get("id")] = int(bo) // 100
+        for pl in data["liveData"]["plays"]["allPlays"]:
+            if (pl.get("result") or {}).get("eventType") != "home_run":
+                continue
+            mu = pl.get("matchup") or {}
+            batter = mu.get("batter") or {}
+            pitcher = mu.get("pitcher") or {}
+            top = str((pl.get("about") or {}).get("halfInning", "")).lower() == "top"
+            bteam, opp = (away_abbr, home_abbr) if top else (home_abbr, away_abbr)
+            spot = spot_by_id.get(batter.get("id"))
+            out.append({
+                "player": batter.get("fullName"),
+                "mlbam_id": batter.get("id"),
+                "team": bteam, "opponent": opp, "home_team": home_abbr,
+                "is_home": not top,
+                "lineup_spot": spot if (spot and 1 <= spot <= 9) else None,
+                "pitcher_name": pitcher.get("fullName"),
+                "pitcher_id": pitcher.get("id"),
+                "hr_count": 1,
+            })
+    except Exception:
+        return ()
+    return tuple(out)
+
+
+@lru_cache(maxsize=2048)
 def fetch_game_box_hrs(game_pk) -> tuple:
     """Return the real HR hitters from a completed game's box score.
 

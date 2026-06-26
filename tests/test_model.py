@@ -303,6 +303,36 @@ def test_boxscore_hr_hitters_extraction(monkeypatch):
     assert cam["team"] == "TB" and cam["pitcher_name"] == "Carlos Rodon"
 
 
+def test_play_by_play_actual_pitcher(monkeypatch):
+    """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
+    from src import sources
+    feed = {
+        "gameData": {"teams": {"home": {"id": 118}, "away": {"id": 139}}},  # KC / TB
+        "liveData": {
+            "boxscore": {"teams": {
+                "home": {"players": {}},
+                "away": {"players": {"ID700": {"person": {"id": 700},
+                                               "battingOrder": "400"}}},
+            }},
+            "plays": {"allPlays": [
+                {"result": {"eventType": "home_run"}, "about": {"halfInning": "top"},
+                 "matchup": {"batter": {"id": 700, "fullName": "Junior Caminero"},
+                             "pitcher": {"id": 111, "fullName": "Seth Lugo"}}},
+                {"result": {"eventType": "home_run"}, "about": {"halfInning": "top"},
+                 "matchup": {"batter": {"id": 700, "fullName": "Junior Caminero"},
+                             "pitcher": {"id": 111, "fullName": "Seth Lugo"}}},
+                {"result": {"eventType": "strikeout"}, "about": {"halfInning": "bottom"},
+                 "matchup": {"batter": {"id": 1}, "pitcher": {"id": 2}}},
+            ]},
+        }}
+    sources.fetch_game_hr_details.cache_clear()
+    monkeypatch.setattr(sources, "_get_json", lambda url, params=None: feed)
+    hrs = sources.fetch_game_hr_details(999)
+    assert len(hrs) == 2                                # 2 HR plays, K excluded
+    assert all(h["player"] == "Junior Caminero" and h["lineup_spot"] == 4
+               and h["pitcher_name"] == "Seth Lugo" and h["team"] == "TB" for h in hrs)
+
+
 def test_sp_spot_signal_feeds_parlay():
     import pandas as pd
     from src.parlay import role_fit
