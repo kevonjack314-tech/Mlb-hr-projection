@@ -181,6 +181,28 @@ def fetch_batting_order_map(game_pk) -> tuple:
     return tuple(out)
 
 
+@lru_cache(maxsize=1024)
+def fetch_game_starters(game_pk) -> tuple:
+    """Return (home_starter_name, away_starter_name) from a game's box score.
+
+    The first id in each team's `pitchers` list is that team's starting pitcher.
+    """
+    if not game_pk:
+        return (None, None)
+    data = _get_json(f"{STATSAPI}/game/{game_pk}/boxscore")
+    out = {"home": None, "away": None}
+    try:
+        for side in ("home", "away"):
+            t = data["teams"][side]
+            pitchers = t.get("pitchers") or []
+            if pitchers:
+                p = t["players"].get(f"ID{pitchers[0]}", {})
+                out[side] = p.get("person", {}).get("fullName")
+    except Exception:
+        return (None, None)
+    return (out["home"], out["away"])
+
+
 @lru_cache(maxsize=64)
 def fetch_weather(home_abbr: str, date_iso: str, hour: int = 19) -> dict:
     """Open-Meteo hourly forecast at the park for the given local hour.

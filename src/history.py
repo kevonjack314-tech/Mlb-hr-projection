@@ -147,6 +147,9 @@ def _live_hr_history(start_iso: str, end_iso: str):
             if gpk not in order_maps:
                 order_maps[gpk] = dict(src_mod.fetch_batting_order_map(gpk))
             spot = order_maps[gpk].get(r.get("batter"))
+            # The opposing STARTING pitcher (home batter faced the away starter).
+            home_sp, away_sp = src_mod.fetch_game_starters(gpk)
+            opp_starter = away_sp if batter_team == home_abbr else home_sp
             prof = {}
             if season_by_id is not None and r.get("batter") in season_by_id.index:
                 srow = season_by_id.loc[r["batter"]]
@@ -167,6 +170,7 @@ def _live_hr_history(start_iso: str, end_iso: str):
                 "home_team": home_abbr,
                 "lineup_spot": spot,
                 "opponent": away_abbr if batter_team == home_abbr else home_abbr,
+                "pitcher_name": opp_starter,
                 "pitcher_throws": r.get("p_throws", "R"),
                 "hr_ev": r.get("launch_speed"),
                 "hr_la": r.get("launch_angle"),
