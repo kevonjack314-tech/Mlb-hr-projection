@@ -191,7 +191,7 @@ GLOSSARY = {
     "Park Factor": "Handedness-aware HR park factor (100 = average; 110 = +10% HR).",
     "Spot": "Batting-order spot (1-9) for this game — live from the posted lineup when available, else estimated. Top-of-order bats get more PAs.",
     "xPA": "Expected plate appearances given the lineup spot (top of order bats more) — feeds the game HR probability.",
-    "SP HRs@Spot": "HRs the opposing starting pitcher has allowed to THIS hitter's lineup spot over their last 5 games — a juicy-spot matchup signal that also boosts the bat in parlay selection.",
+    "SP HRs@Spot": "HRs the opposing starting pitcher has allowed to THIS hitter's lineup spot over their last 10 games — a juicy-spot matchup signal that also boosts the bat in parlay selection.",
     "HRs@Spot": "HRs this hitter has hit from today's lineup spot in the recurring HR-by-spot log (data before the selected date).",
     "HR/G@Spot": "HR per game this hitter has produced from today's lineup spot (recurring log) — a parlay role-fit nudge.",
     "Profile Match": "How closely a hitter resembles the trailing-month HR-hitter profile (barrel%, EV, max EV, launch angle, park) — 100 = a dead-ringer for recent HR hitters.",
@@ -950,7 +950,7 @@ def _render_parlay(result, stake):
                 st.caption(f"_{leg['archetype']}_ · {spot_txt} · {leg.get('rationale','')}")
                 sp = leg.get("sp_hr_at_spot")
                 if pd.notna(sp) and sp and sp > 0:
-                    st.caption(f"🎯 SP allowed **{int(sp)} HR** to the {int(spot)}-spot (last 5)")
+                    st.caption(f"🎯 SP allowed **{int(sp)} HR** to the {int(spot)}-spot (last 10)")
 
     # Combined ticket.
     st.markdown("### 🎟️ The Ticket")
@@ -1183,7 +1183,7 @@ def render_hr_of_day(df):
                 reasons.append(f"matches recent HR hitters ({row['profile_match']:.0f}% profile)")
             sp = row.get("sp_hr_at_spot")
             if pd.notna(sp) and sp and sp > 0 and pd.notna(spot):
-                reasons.append(f"SP gave up {int(sp)} HR to the {int(spot)}-spot (last 5)")
+                reasons.append(f"SP gave up {int(sp)} HR to the {int(spot)}-spot (last 10)")
             if pd.notna(row.get("hr_rate_7")) and row["hr_rate_7"] > 0.04:
                 reasons.append("hot over the last 7 days")
             if row.get("consistency_score", 0) >= 65:
@@ -1232,35 +1232,26 @@ def render_top_picks(df):
 
 
 def _pitcher_spot_card(pitcher_name, pitcher_id, end_iso, prefer_live):
-    """Opposing starter's HRs allowed by lineup spot over last 5 AND last 10
-    games (grouped). Returns the last-5 counts dict (used by the lineup table)."""
+    """Opposing starter's HRs allowed by lineup spot over their last 10 games.
+    Returns the counts dict (used by the lineup table)."""
     from src.pitchers import hottest_spots, pitcher_recent_hr_by_spot
-    c5, n5, t5, src = pitcher_recent_hr_by_spot(pitcher_id, pitcher_name, end_iso, 5, prefer_live)
-    c10, n10, t10, _ = pitcher_recent_hr_by_spot(pitcher_id, pitcher_name, end_iso, 10, prefer_live)
+    counts, n, total, src = pitcher_recent_hr_by_spot(
+        pitcher_id, pitcher_name, end_iso, 10, prefer_live)
     badge = "🟢 real" if src == "LIVE" else "🟡 modeled"
     st.markdown(f"**Opposing SP: {pitcher_name or '—'}**")
-    st.caption(f"HRs allowed by lineup spot · last {n5}g ({t5} HR) vs last {n10}g "
-               f"({t10} HR) · {badge}")
-    rows = ([{"Spot": s, "HRs": c5[s], "Window": f"Last {n5}"} for s in range(1, 10)]
-            + [{"Spot": s, "HRs": c10[s], "Window": f"Last {n10}"} for s in range(1, 10)])
-    cdf = pd.DataFrame(rows)
+    st.caption(f"HRs allowed by lineup spot · last {n} games · {total} HR ({badge})")
+    cdf = pd.DataFrame({"Spot": list(counts), "HRs": list(counts.values())})
     st.altair_chart(
-        alt.Chart(cdf).mark_bar().encode(
+        alt.Chart(cdf).mark_bar(color="#e63946").encode(
             x=alt.X("Spot:O", title="Lineup spot"),
-            xOffset="Window:N",
             y=alt.Y("HRs:Q", title="HRs allowed"),
-            color=alt.Color("Window:N", scale=alt.Scale(range=["#ff5864", "#7a8aa0"]),
-                            legend=alt.Legend(orient="top", title=None)),
-            tooltip=["Window", "Spot", "HRs"]).properties(height=170),
+            tooltip=["Spot", "HRs"]).properties(height=160),
         use_container_width=True,
     )
-    h5 = hottest_spots(c5, 2)
-    h10 = hottest_spots(c10, 2)
-    if h5:
-        st.caption("🎯 Last 5: most vulnerable to spots " + ", ".join(f"**#{s}**" for s in h5))
-    if h10:
-        st.caption("📊 Last 10: " + ", ".join(f"**#{s}**" for s in h10))
-    return c5
+    hot = hottest_spots(counts, 2)
+    if hot:
+        st.caption("🎯 Most vulnerable to spots " + ", ".join(f"**#{s}**" for s in hot))
+    return counts
 
 
 def _lineup_table(sub, opp_counts):
@@ -1280,7 +1271,7 @@ def _lineup_table(sub, opp_counts):
             "SP HRs@Spot": st.column_config.NumberColumn(
                 "SP HRs@Spot",
                 help="HRs the opposing starter has allowed to THIS lineup spot over "
-                     "their last 5 games — higher = a juicier spot to target.",
+                     "their last 10 games — higher = a juicier spot to target.",
                 format="%d"),
         },
     )
@@ -1290,7 +1281,7 @@ def tab_lineups(df, end_iso, prefer_live):
     st.subheader("🧾 Lineups & Pitcher HR Spots")
     st.caption(
         "Today's batting orders (1–9) for both teams in each game, next to the "
-        "**opposing starter's HRs allowed by lineup spot over their last 5 games**. "
+        "**opposing starter's HRs allowed by lineup spot over their last 10 games**. "
         "The **SP HRs@Spot** column flags which order positions have taken that "
         "pitcher deep. Updates with the selected date. *(Live mode uses posted "
         "lineups + real Statcast; demo uses modeled orders.)*"
@@ -1373,7 +1364,7 @@ def main():
     scored = add_profile_similarity(scored, centroid)
     scored = attach_spot_signal(scored, player_spot)
     scored = attach_calibrated_prob(scored, score_curve)   # learn from past ratings
-    # Opposing-starter HRs allowed by lineup spot (last 5 games) -> per hitter.
+    # Opposing-starter HRs allowed by lineup spot (last 10 games) -> per hitter.
     _has_pid = "pitcher_id" in scored.columns
     _pairs = tuple(
         (game, name, (grp["pitcher_id"].iloc[0] if _has_pid else None))
