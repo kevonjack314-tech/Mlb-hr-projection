@@ -670,16 +670,16 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
         sheet_sorted["role"] = sheet_sorted["hr_prob_game"].map(assign_role)
     if "hr_score" in sheet_sorted.columns:
         sheet_sorted["verdict"] = sheet_sorted["hr_score"].map(_model_verdict)
-    sheet_cols = [c for c in ["date", "player", "team", "opponent", "lineup_spot",
-                              "hr_count", "hr_score", "hr_prob_game", "role", "verdict",
-                              "barrel_pct", "max_ev", "hr_fb", "xiso", "park_factor",
-                              "recent_form_score", "pitcher_name", "rationale"]
+    sheet_cols = [c for c in ["date", "player", "team", "lineup_spot", "pitcher_name",
+                              "opponent", "hr_count", "hr_score", "hr_prob_game", "role",
+                              "verdict", "barrel_pct", "max_ev", "hr_fb", "xiso",
+                              "park_factor", "recent_form_score", "rationale"]
                   if c in sheet_sorted.columns]
     show = sheet_sorted[sheet_cols].rename(columns={
         "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
         "lineup_spot": "Spot", "hr_count": "HR", "hr_score": "Model Score",
         "hr_prob_game": "Model HR%", "role": "Role", "verdict": "Model take",
-        "pitcher_name": "Off Pitcher", "park_factor": "Park",
+        "pitcher_name": "Starting Pitcher", "park_factor": "Park",
         "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
         "recent_form_score": "Recent Form", "rationale": "Why they hit"})
     if "Spot" in show.columns:
@@ -770,40 +770,39 @@ def tab_previous_hrs(history):
             st.caption("Middle-order spots (3-5) usually lead — exactly why the parlay "
                        "builder anchors there.")
 
-    # --- Batters by lineup spot (names under each spot) ---
+    # --- Batters by lineup spot: each HR with batter, starting pitcher & why ---
     if events is not None and not events.empty and "lineup_spot" in events.columns:
         ev = events.dropna(subset=["lineup_spot"]).copy()
         if not ev.empty:
             ev["lineup_spot"] = ev["lineup_spot"].astype(int)
-            ev["hrs"] = ev["hr_count"] if "hr_count" in ev.columns else 1
             spots_present = sorted(ev["lineup_spot"].unique())
             st.markdown("##### 🔢 Batters by lineup spot")
-            st.caption("Which hitters went deep from each batting-order spot in the window.")
+            st.caption("Pick a spot to see every hitter who homered from it — with the "
+                       "starting pitcher they faced, key metrics, and why they hit it.")
             spot_tabs = st.tabs([f"#{s}" for s in spots_present])
             for tab, s in zip(spot_tabs, spots_present):
                 with tab:
-                    grp = ev[ev["lineup_spot"] == s]
-                    agg = {"hrs": ("hrs", "sum")}
-                    if "hr_score" in grp.columns:
-                        agg["mscore"] = ("hr_score", "mean")
-                    if "barrel_pct" in grp.columns:
-                        agg["barrel"] = ("barrel_pct", "mean")
-                    if "max_ev" in grp.columns:
-                        agg["maxev"] = ("max_ev", "max")
-                    tbl = grp.groupby(["player", "team"]).agg(**agg).reset_index()
-                    tbl = tbl.sort_values("hrs", ascending=False)
-                    ren = {"player": "Player", "team": "Team", "hrs": "HRs",
-                           "mscore": "Model Score", "barrel": "Barrel%", "maxev": "Max EV"}
-                    st.caption(f"**{int(grp['hrs'].sum())} HRs** from the {s}-spot · "
+                    grp = ev[ev["lineup_spot"] == s].sort_values("date", ascending=False)
+                    n_hr = int(grp["hr_count"].sum()) if "hr_count" in grp.columns else len(grp)
+                    st.caption(f"**{n_hr} HRs** from the {s}-spot · "
                                f"**{grp['player'].nunique()}** hitters")
+                    cols = [c for c in ["date", "player", "team", "pitcher_name",
+                                        "hr_score", "barrel_pct", "max_ev", "hr_fb",
+                                        "rationale"] if c in grp.columns]
+                    tbl = grp[cols].rename(columns={
+                        "date": "Date", "player": "Player", "team": "Team",
+                        "pitcher_name": "Starting Pitcher", "hr_score": "Model Score",
+                        "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB",
+                        "rationale": "Why they hit"})
                     st.dataframe(
-                        tbl.rename(columns=ren), hide_index=True, use_container_width=True,
-                        height=min(420, 60 + 35 * min(len(tbl), 10)),
+                        tbl, hide_index=True, use_container_width=True,
+                        height=min(460, 60 + 35 * min(len(tbl), 11)),
                         column_config={
-                            "HRs": st.column_config.NumberColumn("HRs", format="%d"),
                             "Model Score": st.column_config.ProgressColumn("Model Score", min_value=0, max_value=100, format="%.0f"),
                             "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
                             "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
+                            "HR/FB": st.column_config.NumberColumn("HR/FB", format="%.1f"),
+                            "Why they hit": st.column_config.TextColumn("Why they hit", width="large"),
                         },
                     )
 
@@ -1233,25 +1232,35 @@ def render_top_picks(df):
 
 
 def _pitcher_spot_card(pitcher_name, pitcher_id, end_iso, prefer_live):
-    """Opposing starter's HRs allowed by lineup spot (last 5). Returns counts dict."""
+    """Opposing starter's HRs allowed by lineup spot over last 5 AND last 10
+    games (grouped). Returns the last-5 counts dict (used by the lineup table)."""
     from src.pitchers import hottest_spots, pitcher_recent_hr_by_spot
-    counts, n, total, src = pitcher_recent_hr_by_spot(
-        pitcher_id, pitcher_name, end_iso, 5, prefer_live)
+    c5, n5, t5, src = pitcher_recent_hr_by_spot(pitcher_id, pitcher_name, end_iso, 5, prefer_live)
+    c10, n10, t10, _ = pitcher_recent_hr_by_spot(pitcher_id, pitcher_name, end_iso, 10, prefer_live)
     badge = "🟢 real" if src == "LIVE" else "🟡 modeled"
     st.markdown(f"**Opposing SP: {pitcher_name or '—'}**")
-    st.caption(f"HRs allowed by lineup spot · last {n} games · {total} HR ({badge})")
-    cdf = pd.DataFrame({"Spot": list(counts), "HRs": list(counts.values())})
+    st.caption(f"HRs allowed by lineup spot · last {n5}g ({t5} HR) vs last {n10}g "
+               f"({t10} HR) · {badge}")
+    rows = ([{"Spot": s, "HRs": c5[s], "Window": f"Last {n5}"} for s in range(1, 10)]
+            + [{"Spot": s, "HRs": c10[s], "Window": f"Last {n10}"} for s in range(1, 10)])
+    cdf = pd.DataFrame(rows)
     st.altair_chart(
-        alt.Chart(cdf).mark_bar(color="#e63946").encode(
+        alt.Chart(cdf).mark_bar().encode(
             x=alt.X("Spot:O", title="Lineup spot"),
+            xOffset="Window:N",
             y=alt.Y("HRs:Q", title="HRs allowed"),
-            tooltip=["Spot", "HRs"]).properties(height=150),
+            color=alt.Color("Window:N", scale=alt.Scale(range=["#ff5864", "#7a8aa0"]),
+                            legend=alt.Legend(orient="top", title=None)),
+            tooltip=["Window", "Spot", "HRs"]).properties(height=170),
         use_container_width=True,
     )
-    hot = hottest_spots(counts, 2)
-    if hot:
-        st.caption("🎯 Most vulnerable to spots " + ", ".join(f"**#{s}**" for s in hot))
-    return counts
+    h5 = hottest_spots(c5, 2)
+    h10 = hottest_spots(c10, 2)
+    if h5:
+        st.caption("🎯 Last 5: most vulnerable to spots " + ", ".join(f"**#{s}**" for s in h5))
+    if h10:
+        st.caption("📊 Last 10: " + ", ".join(f"**#{s}**" for s in h10))
+    return c5
 
 
 def _lineup_table(sub, opp_counts):

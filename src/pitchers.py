@@ -30,12 +30,24 @@ def _seed(*parts) -> int:
 
 
 def _demo_hr_by_spot(name: str, end_date_iso: str, n_games: int) -> tuple[dict, int, int]:
+    """Deterministic per-game HR-allowed, accumulated over the last `n_games`.
+
+    The same 10-game sequence is generated each call, so the last-5 window is a
+    true subset of the last-10 window (10-game counts >= 5-game counts).
+    """
     rng = np.random.default_rng(_seed(name or "P", end_date_iso, "pithr"))
-    total = int(rng.integers(2, 9))            # HRs allowed over the window
     spots = list(range(1, 10))
     w = np.array([_SPOT_HR_WEIGHTS[s] for s in spots], dtype=float)
-    counts = rng.multinomial(total, w / w.sum())
-    return {s: int(c) for s, c in zip(spots, counts)}, n_games, total
+    counts = {s: 0 for s in spots}
+    total = 0
+    for g in range(10):                         # last 10 games, most recent first
+        hrs = int(rng.integers(0, 3))           # 0-2 HRs allowed that game
+        picks = rng.multinomial(hrs, w / w.sum()) if hrs else None
+        if g < n_games and picks is not None:
+            for s, c in zip(spots, picks):
+                counts[s] += int(c)
+            total += hrs
+    return counts, n_games, total
 
 
 @lru_cache(maxsize=256)
@@ -49,7 +61,9 @@ def _live_hr_by_spot(pitcher_id: int, end_date_iso: str, n_games: int):
         import pybaseball as pyb
 
         end = dt.date.fromisoformat(end_date_iso)
-        start = end - dt.timedelta(days=45)
+        # Widen the window for larger N so ~n_games starts are actually covered
+        # (a starter makes ~1 start per 5 days).
+        start = end - dt.timedelta(days=max(45, n_games * 8))
         df = pyb.statcast_pitcher(start.isoformat(), end.isoformat(), pitcher_id)
         if df is None or df.empty or "game_pk" not in df.columns:
             return None
