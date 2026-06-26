@@ -277,6 +277,32 @@ def test_pitcher_id_handles_missing_and_nan():
     assert ("A @ B", "TBD") in m
 
 
+def test_boxscore_hr_hitters_extraction(monkeypatch):
+    """Real HR hitters (name, spot, HR count, opposing SP) come from the box score."""
+    from src import sources
+    fake = {"teams": {
+        "home": {"team": {"id": 139}, "pitchers": [600], "players": {
+            "ID600": {"person": {"id": 600, "fullName": "Home Starter"}},
+            "ID700": {"person": {"id": 700, "fullName": "Junior Caminero"},
+                      "battingOrder": "400", "stats": {"batting": {"homeRuns": 3}}},
+            "ID701": {"person": {"id": 701, "fullName": "No HR Guy"},
+                      "battingOrder": "500", "stats": {"batting": {"homeRuns": 0}}},
+        }},
+        "away": {"team": {"id": 147}, "pitchers": [800], "players": {
+            "ID800": {"person": {"id": 800, "fullName": "Carlos Rodon"}},
+            "ID900": {"person": {"id": 900, "fullName": "Aaron Judge"},
+                      "battingOrder": "200", "stats": {"batting": {"homeRuns": 1}}},
+        }},
+    }}
+    sources.fetch_game_box_hrs.cache_clear()
+    monkeypatch.setattr(sources, "_get_json", lambda url, params=None: fake)
+    hrs = {h["player"]: h for h in sources.fetch_game_box_hrs(777)}
+    assert "No HR Guy" not in hrs                       # 0 HR excluded
+    cam = hrs["Junior Caminero"]
+    assert cam["hr_count"] == 3 and cam["lineup_spot"] == 4
+    assert cam["team"] == "TB" and cam["pitcher_name"] == "Carlos Rodon"
+
+
 def test_sp_spot_signal_feeds_parlay():
     import pandas as pd
     from src.parlay import role_fit

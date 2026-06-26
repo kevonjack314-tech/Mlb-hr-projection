@@ -63,6 +63,10 @@ keeps the lineup HR log fresh.
    next to the **opposing starter's HRs allowed by lineup spot over their last 10
    games** (an **SP HRs@Spot** column flags which order positions take that pitcher
    deep). Live from posted lineups + Statcast box scores; updates with the date.
+5b. **📋 Previous HRs** — the real home runs from recent days (live from **MLB
+   StatsAPI box scores**: batter, HR count, lineup spot, and the starting pitcher
+   they faced), with each bat's metrics, what the model rated them, and a
+   "why they hit" insight; plus a per-lineup-spot breakdown.
 6. **📈 HR Trends & Backtest** — analyzes **every home run over the trailing ~month**
    (configurable lookback): a browsable **stat sheet of previous HR hitters with
    their lineup spot** (filter by spot/team/player, CSV export), the *shared
