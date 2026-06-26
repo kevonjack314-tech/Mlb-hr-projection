@@ -181,6 +181,56 @@ def fetch_batting_order_map(game_pk) -> tuple:
     return tuple(out)
 
 
+@lru_cache(maxsize=2048)
+def fetch_game_box_hrs(game_pk) -> tuple:
+    """Return the real HR hitters from a completed game's box score.
+
+    Tuple of dicts, one per hitter who homered: player name + MLBAM id, team,
+    opponent, lineup spot (battingOrder // 100), HR count that game, the opposing
+    STARTING pitcher, and home-team context. Pure MLB StatsAPI — light and fast.
+    """
+    if not game_pk:
+        return ()
+    data = _get_json(f"{STATSAPI}/game/{game_pk}/boxscore")
+    if not data:
+        return ()
+    out = []
+    try:
+        teams = data["teams"]
+        abbr = {s: _TEAM_ID_TO_ABBR.get(teams[s]["team"]["id"]) for s in ("home", "away")}
+        starters = {}
+        for s in ("home", "away"):
+            pits = teams[s].get("pitchers") or []
+            starters[s] = (teams[s]["players"].get(f"ID{pits[0]}", {})
+                           .get("person", {}).get("fullName") if pits else None)
+        for side in ("home", "away"):
+            opp = "away" if side == "home" else "home"
+            for _key, p in teams[side]["players"].items():
+                hr = ((p.get("stats") or {}).get("batting") or {}).get("homeRuns") or 0
+                try:
+                    hr = int(hr)
+                except (TypeError, ValueError):
+                    hr = 0
+                if hr <= 0:
+                    continue
+                bo = p.get("battingOrder")
+                spot = int(bo) // 100 if bo else None
+                out.append({
+                    "player": p.get("person", {}).get("fullName"),
+                    "mlbam_id": p.get("person", {}).get("id"),
+                    "team": abbr[side],
+                    "opponent": abbr[opp],
+                    "home_team": abbr["home"],
+                    "is_home": side == "home",
+                    "lineup_spot": spot if (spot and 1 <= spot <= 9) else None,
+                    "hr_count": hr,
+                    "pitcher_name": starters[opp],
+                })
+    except Exception:
+        return ()
+    return tuple(out)
+
+
 @lru_cache(maxsize=1024)
 def fetch_game_starters(game_pk) -> tuple:
     """Return (home_starter_name, away_starter_name) from a game's box score.

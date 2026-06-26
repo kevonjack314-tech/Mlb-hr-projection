@@ -114,76 +114,66 @@ def _simulated_hr_history(start_iso: str, end_iso: str):
     return events_df, slate_df
 
 
+# Cap the LIVE real-HR window (box-score calls) for responsiveness; the stat
+# sheet is about *recent* HRs and this keeps first load fast.
+_LIVE_HR_MAX_DAYS = 14
+
+_PROFILE_METRIC_COLS = [
+    "barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev", "launch_angle",
+    "whiff_pct", "chase_pct", "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
+    "pull_pct", "hr_fb", "xiso", "xslg", "sprint_speed", "xwoba", "hr_per_pa",
+]
+
+
 def _live_hr_history(start_iso: str, end_iso: str):
+    """Real HR hitters straight from MLB StatsAPI box scores (batter, HR count,
+    lineup spot, opposing starter), enriched with season Statcast metrics and
+    scored. Light and reliable — no multi-million-row Statcast pull."""
     try:
-        from . import statcast as sc_mod
         from . import sources as src_mod
-        if not sc_mod.is_available():
-            return None
-        import pybaseball as pyb
+        from . import statcast as sc_mod
 
-        sc = pyb.statcast(start_dt=start_iso, end_dt=end_iso, verbose=False)
-        if sc is None or sc.empty or "events" not in sc.columns:
-            return None
-        hr = sc[sc["events"] == "home_run"].copy()
-        if hr.empty:
-            return None
-
-        year = dt.date.fromisoformat(end_iso).year
-        season = sc_mod.get_season_batter_table(year)
-        season_by_id = season.set_index("mlbam_id") if not season.empty else None
-        order_maps: dict = {}   # game_pk -> {player_id: lineup spot} from box scores
+        end = dt.date.fromisoformat(end_iso)
+        start = dt.date.fromisoformat(start_iso)
+        if (end - start).days > _LIVE_HR_MAX_DAYS:
+            start = end - dt.timedelta(days=_LIVE_HR_MAX_DAYS)
 
         rows = []
-        for _, r in hr.iterrows():
-            home_abbr = _SAVANT_TEAM_FIX.get(r.get("home_team"), r.get("home_team"))
-            stand = (r.get("stand") or "R")
-            park = get_park(home_abbr)
-            away_abbr = _SAVANT_TEAM_FIX.get(r.get("away_team"), r.get("away_team"))
-            # Batter's team: away bats in the top of the inning, home in the bottom.
-            batter_team = away_abbr if str(r.get("inning_topbot", "")).startswith("Top") else home_abbr
-            # Real lineup spot from that game's box score (cached per game_pk).
-            gpk = r.get("game_pk")
-            if gpk not in order_maps:
-                order_maps[gpk] = dict(src_mod.fetch_batting_order_map(gpk))
-            spot = order_maps[gpk].get(r.get("batter"))
-            # The opposing STARTING pitcher (home batter faced the away starter).
-            home_sp, away_sp = src_mod.fetch_game_starters(gpk)
-            opp_starter = away_sp if batter_team == home_abbr else home_sp
-            prof = {}
-            if season_by_id is not None and r.get("batter") in season_by_id.index:
-                srow = season_by_id.loc[r["batter"]]
-                if isinstance(srow, pd.DataFrame):
-                    srow = srow.iloc[0]
-                prof = {m: srow.get(m) for m in
-                        ["barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
-                         "launch_angle", "whiff_pct", "chase_pct",
-                         "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
-                         "pull_pct", "hr_fb", "xiso", "xslg", "sprint_speed",
-                         "xwoba", "hr_per_pa"]}
-            rows.append({
-                "date": str(r.get("game_date")),
-                "player": r.get("player_name"),
-                "mlbam_id": r.get("batter"),
-                "bats": stand,
-                "team": batter_team,
-                "home_team": home_abbr,
-                "lineup_spot": spot,
-                "opponent": away_abbr if batter_team == home_abbr else home_abbr,
-                "pitcher_name": opp_starter,
-                "pitcher_throws": r.get("p_throws", "R"),
-                "hr_ev": r.get("launch_speed"),
-                "hr_la": r.get("launch_angle"),
-                "hr_distance": r.get("hit_distance_sc"),
-                "hr_count": 1,
-                **prof,
-            })
+        d = end
+        while d >= start:
+            for g in src_mod.fetch_schedule(d.isoformat()):
+                for hr in src_mod.fetch_game_box_hrs(g.get("game_pk")):
+                    row = dict(hr)
+                    row["date"] = d.isoformat()
+                    rows.append(row)
+            d -= dt.timedelta(days=1)
+        if not rows:
+            return None
+
         events_df = pd.DataFrame(rows)
-        # Run the HR hitters' pre-game profiles through the model so the stat
-        # sheet shows the same metrics + "what we'd have rated them" as the demo.
-        events_df = score_slate(events_df)
-        # No full scored slate available in the live HR-only pull; calibration
-        # falls back to the simulated slate in that mode.
+        # Enrich with season batted-ball metrics by MLBAM id (cached pull).
+        try:
+            season = sc_mod.get_season_batter_table(end.year)
+            if season is not None and not season.empty and "mlbam_id" in season.columns:
+                sby = season.set_index("mlbam_id")
+                for mc in _PROFILE_METRIC_COLS:
+                    if mc in sby.columns:
+                        col = sby[mc]
+                        events_df[mc] = events_df["mlbam_id"].map(
+                            lambda i, _c=col: _c.get(i, np.nan))
+        except Exception:
+            pass
+
+        if "bats" not in events_df.columns:
+            events_df["bats"] = "R"
+        if "pitcher_throws" not in events_df.columns:
+            events_df["pitcher_throws"] = "R"
+        # Score so the stat sheet shows metrics + "what we'd have rated them".
+        try:
+            events_df = score_slate(events_df)
+        except Exception:
+            pass
+        # Calibration/report card still use the simulated full-slate-with-outcomes.
         _, slate_df = _simulated_hr_history(start_iso, end_iso)
         return events_df, slate_df
     except Exception:
