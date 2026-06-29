@@ -109,6 +109,19 @@ when available, else estimated. It feeds the model three ways:
   log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
   3–4 — exactly where real middle-of-the-order power lives.)
 
+### ULX methodology (instilled)
+
+The model encodes the ULX playbook ("bet the profile, not the name") in `src/ulx.py`:
+- **Power checklist** — each bat is graded 🟢/🟡/🔴 on 9 minimums: Barrel% ≥ 8,
+  Hard-Hit% ≥ 40, xSLG ≥ .450, ISO ≥ .160, Sweet-Spot% ≥ 30, Avg EV ≥ 88, Launch
+  10–28°, Pull% ≥ 35, HR/FB ≥ 12. The check count (**ULX ✓**) is the backbone of the
+  Longshot score and boosts Value/Longshot legs in parlay selection.
+- **Platoon is the first filter** (already in the matchup), with a **same-handed
+  smasher** exception (elite power that homers regardless of handedness).
+- **Longshots bat 5–9** (overlooked) in the parlay role-fit.
+- **HR environment / "🔥 HR Hunting Mode"** — wind out, warm temps, hitter park, and
+  a homer-prone / fly-ball starter; flagged per game in the Lineups tab.
+
 ### Featured picks
 
 - **🔒 HR of the Day** — a single highest-**confidence** lock at the top of the page,

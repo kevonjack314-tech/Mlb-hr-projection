@@ -28,6 +28,7 @@ from .parks import (
     temp_hr_multiplier,
     wind_hr_multiplier,
 )
+from .ulx import hr_environment, power_checks
 
 # League average HR per plate appearance (modern run environment).
 LEAGUE_HR_PER_PA = 0.034
@@ -313,6 +314,22 @@ def score_row(row: pd.Series) -> dict:
     out["gb_score"] = round(gb_score, 1)
     out["ld_score"] = round(ld_score, 1)
 
+    # --- ULX power checklist + HR environment (instilled thresholds) ---
+    ulx = power_checks(row)
+    out["ulx_checks"] = ulx["ulx_checks"]
+    out["ulx_total"] = ulx["ulx_total"]
+    out["ulx_score"] = ulx["ulx_score"]
+    out["ulx_grade"] = ulx["ulx_grade"]
+    out["same_handed_smasher"] = ulx["same_handed_smasher"]
+    hr_env = hr_environment({
+        "wind_mult": out["wind_mult"], "temp_f": row.get("temp_f"),
+        "park_factor": out["park_factor"], "pitcher_hr9": row.get("pitcher_hr9"),
+        "pitcher_lean": row.get("pitcher_lean"),
+    })
+    out["hr_env_score"] = hr_env["hr_env_score"]
+    out["hr_env_count"] = hr_env["hr_env_count"]
+    out["hr_hunting"] = hr_env["hr_hunting"]
+
     # --- Composite HR Score (0-100) ---
     hr_score = (
         HR_SCORE_WEIGHTS["power_quality"] * power_quality
@@ -352,16 +369,18 @@ def score_row(row: pd.Series) -> dict:
     out["fair_odds"] = _prob_to_american(p_game)
 
     # --- Longshot Score (boom-or-bust ceiling) ---
-    # The ceiling rewards air-ball power: fly-ball rate, HR/FB conversion, and
-    # pull tendency (pulled fly balls clear the wall most often).
+    # ULX: "longshots don't win parlays, PROFILES do" — the power checklist is the
+    # backbone, alongside air-ball power (fly-ball rate, HR/FB, pull) and the spot's
+    # HR environment.
     longshot = (
-        0.32 * out["max_ev_score"]
-        + 0.20 * out["barrel_score"]
-        + 0.13 * fb_score
-        + 0.10 * hr_fb_score
-        + 0.08 * pull_score
+        0.24 * ulx["ulx_score"]
+        + 0.22 * out["max_ev_score"]
+        + 0.14 * out["barrel_score"]
+        + 0.10 * fb_score
+        + 0.08 * hr_fb_score
+        + 0.06 * pull_score
         + 0.10 * env["env_score"]
-        + 0.07 * matchup_score
+        + 0.06 * matchup_score
     )
     # Reward variance (more swing-and-miss & more chasing = more boom-or-bust) and
     # slightly de-emphasize players who are already chalk (not a "longshot").

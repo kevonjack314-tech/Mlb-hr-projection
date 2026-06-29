@@ -71,8 +71,8 @@ def spot_role_fit(spot, role: str) -> float:
         return 6.0 if 3 <= s <= 5 else (3.0 if s == 2 else 0.0)
     if role == "Value":
         return 6.0 if s in (1, 6, 7) else 2.0
-    if role == "Longshot":
-        return 6.0 if s >= 8 else (3.0 if s == 7 else 0.0)
+    if role == "Longshot":   # ULX: longshots ideally bat 5-9 (overlooked)
+        return 6.0 if 6 <= s <= 9 else (4.0 if s == 5 else 0.0)
     return 0.0
 
 
