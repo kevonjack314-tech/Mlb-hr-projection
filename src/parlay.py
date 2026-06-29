@@ -101,6 +101,12 @@ def role_fit(row: pd.Series, role: str) -> float:
     sp = row.get("sp_hr_at_spot")
     if pd.notna(sp):
         hist_bonus += float(min(7.0, float(sp) * 2.3))
+    # ULX power checklist: "profiles win parlays" — reward green checks (0-9),
+    # weighted most for Value/Longshot legs where the profile is the whole case.
+    checks = row.get("ulx_checks")
+    if pd.notna(checks):
+        weight = 1.0 if role == "Anchor" else 1.6
+        hist_bonus += float(checks) * weight
     if role == "Anchor":
         return float(row.get("hr_score", 0)) + spot_bonus + hist_bonus
     if role == "Value":

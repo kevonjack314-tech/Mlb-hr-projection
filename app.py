@@ -164,7 +164,11 @@ GLOSSARY = {
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
-    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
+    "ULX": "ULX power-checklist grade — 🟢 GREEN (≥7 of 9 minimums met, run it), 🟡 YELLOW (4-6, consider), 🔴 RED (<4, fade). Bet the profile, not the name.",
+    "ULX ✓": "How many of the 9 ULX power minimums the bat meets: Barrel%≥8, Hard-Hit%≥40, xSLG≥.450, ISO≥.160, Sweet-Spot%≥30, AvgEV≥88, Launch 10-28°, Pull%≥35, HR/FB≥12.",
+    "ISO": "Isolated power (SLG − AVG) — raw power output. ULX longshot minimum ≥ .160.",
+    "Sweet-Spot%": "Share of batted balls in the 8-32° launch-angle sweet spot (real, Statcast). ULX minimum ≥ 30%.",
+    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor). ULX minimum ≥ 8%.",
     "Barrel/PA%": "Barrels per plate appearance (real, Statcast) — barrel rate scaled by how often the bat puts a ball in play; an elite season-long HR signal.",
     "xHR (season)": "Season expected home runs from batted-ball quality (barrels/PA + fly-ball rate). The gap vs actual HR flags luck/regression.",
     "HR−xHR": "Actual HR minus expected HR. Negative = under-performing the quality of contact (a positive-regression / 'due' candidate, used in the Sneaky score).",
@@ -325,6 +329,8 @@ DISPLAY_COLUMNS = {
     "bats": "Bats",
     "position": "Pos",
     "lineup_spot": "Spot",
+    "ulx_grade": "ULX",
+    "ulx_checks": "ULX ✓",
     "hr_score": "HR Score",
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
@@ -355,6 +361,8 @@ DISPLAY_COLUMNS = {
     "xwoba": "xwOBA",
     "xiso": "xISO",
     "xslg": "xSLG",
+    "iso": "ISO",
+    "sweet_spot_pct": "Sweet-Spot%",
     "xhr_season": "xHR (season)",
     "hr_minus_xhr": "HR−xHR",
     "sprint_speed": "Sprint",
@@ -380,6 +388,7 @@ DISPLAY_COLUMNS = {
 # view shows everything. The active headline/sort column is always added back.
 ESSENTIAL_KEYS = {
     "player", "team", "opponent", "pitcher_name", "lineup_spot",
+    "ulx_grade", "ulx_checks",
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
@@ -402,6 +411,10 @@ COLUMN_CONFIG = {
     ),
     "Calib HR%": st.column_config.NumberColumn("Calib HR%", help=GLOSSARY["Calib HR%"], format="%.0f%%"),
     "Calib Edge": st.column_config.NumberColumn("Calib Edge", help=GLOSSARY["Calib Edge"], format="%+.1f"),
+    "ULX": st.column_config.TextColumn("ULX", help=GLOSSARY["ULX"]),
+    "ULX ✓": st.column_config.NumberColumn("ULX ✓", help=GLOSSARY["ULX ✓"], format="%d/9"),
+    "ISO": st.column_config.NumberColumn("ISO", help=GLOSSARY["ISO"], format="%.3f"),
+    "Sweet-Spot%": st.column_config.NumberColumn("Sweet-Spot%", help=GLOSSARY["Sweet-Spot%"], format="%.1f"),
     "xHR (game)": st.column_config.NumberColumn("xHR (game)", help=GLOSSARY["xHR (game)"], format="%.2f"),
     "xHR (season)": st.column_config.NumberColumn("xHR (season)", help=GLOSSARY["xHR (season)"], format="%.1f"),
     "HR−xHR": st.column_config.NumberColumn("HR−xHR", help=GLOSSARY["HR−xHR"], format="%+.1f"),
@@ -537,9 +550,9 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "lineup_spot",
-            "longshot_score", "hr_prob_game", "book_odds", "edge_pct", "sp_hr_at_spot",
-            "max_ev", "barrel_pct", "brl_pa", "fb_pct", "hr_fb", "pull_pct",
-            "whiff_pct", "park_factor", "wind_mult", "rationale"]
+            "ulx_grade", "ulx_checks", "longshot_score", "hr_prob_game", "book_odds",
+            "edge_pct", "sp_hr_at_spot", "max_ev", "barrel_pct", "iso",
+            "sweet_spot_pct", "hr_fb", "pull_pct", "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
                  cols, "Longshot", "longshots")
 
@@ -1188,6 +1201,9 @@ def render_hr_of_day(df):
                 reasons.append("hot over the last 7 days")
             if row.get("consistency_score", 0) >= 65:
                 reasons.append("high floor / steady hard contact")
+            if pd.notna(row.get("ulx_checks")):
+                reasons.insert(0, f"ULX profile {row.get('ulx_grade','')} "
+                               f"({int(row['ulx_checks'])}/9 power checks)")
             st.markdown("**Why we're confident:** " + "; ".join(reasons[:4]) + ".")
         with c2:
             m1, m2 = st.columns(2)
@@ -1289,6 +1305,13 @@ def tab_lineups(df, end_iso, prefer_live):
     games = sorted(df["game"].unique())
     game = st.selectbox("Game", games, key="lu_game")
     g = df[df["game"] == game]
+    # ULX "HR hunting mode" read for the game's environment.
+    env_count = int(g["hr_env_count"].max()) if "hr_env_count" in g.columns else 0
+    if "hr_hunting" in g.columns and g["hr_hunting"].any():
+        st.success(f"🔥 **HR Hunting Mode** — strong HR environment ({env_count}/5 "
+                   "signals: wind out / warm / hitter park / homer-prone or fly-ball SP).")
+    elif env_count >= 2:
+        st.info(f"☀️ Decent HR environment ({env_count}/5 signals aligned).")
     is_home = g["is_home"].astype(bool)
     away = g[~is_home].dropna(subset=["lineup_spot"]).sort_values("lineup_spot")
     home = g[is_home].dropna(subset=["lineup_spot"]).sort_values("lineup_spot")

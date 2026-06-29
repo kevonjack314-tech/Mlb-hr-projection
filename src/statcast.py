@@ -108,6 +108,7 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
             "brl_percent": "barrel_pct",
             "brl_pa": "brl_pa",
             "avg_hit_angle": "launch_angle",
+            "anglesweetspotpercent": "sweet_spot_pct",
             "player_id": "mlbam_id",
         }
     )
@@ -116,6 +117,7 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     ev["name_key"] = ev["name_full"].map(normalize_name)
 
     keep = ["name_key", "mlbam_id", "barrel_pct", "brl_pa", "hard_hit_pct",
+            "sweet_spot_pct",
             "avg_ev", "max_ev", "launch_angle"]
     keep = [c for c in keep if c in ev.columns]
     table = ev[keep].copy()
@@ -133,7 +135,7 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
                          ("Contact%", "contact_pct"), ("SwStr%", "swstr_pct"),
                          ("O-Swing%", "chase_pct"), ("Z-Contact%", "zone_contact_pct"),
                          ("FB%", "fb_pct"), ("GB%", "gb_pct"), ("LD%", "ld_pct"),
-                         ("Pull%", "pull_pct"), ("HR/FB", "hr_fb")]:
+                         ("Pull%", "pull_pct"), ("HR/FB", "hr_fb"), ("ISO", "iso")]:
             if src in fg.columns:
                 cols[src] = dst
         fg_small = fg[["name_key"] + list(cols)].rename(columns=cols)
@@ -191,11 +193,14 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
 
     # Plate-discipline + batted-ball rates (real, FanGraphs), normalized to 0-100%.
     for col in ("chase_pct", "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
-                "pull_pct", "hr_fb"):
+                "pull_pct", "hr_fb", "sweet_spot_pct"):
         if col in table:
             table[col] = table[col].map(_coerce_pct)
         else:
             table[col] = np.nan
+    # ISO is a rate (~.160), not a percent — keep as-is.
+    if "iso" not in table:
+        table["iso"] = np.nan
 
     table["hr_per_pa"] = (table["season_hr"] / table["pa"]).replace([np.inf, -np.inf], np.nan)
     table["power_tier"] = table["barrel_pct"].map(_tier_from_barrel)
@@ -461,7 +466,8 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "chase_pct": g("chase_pct"), "zone_contact_pct": g("zone_contact_pct"),
         "fb_pct": g("fb_pct"), "gb_pct": g("gb_pct"), "ld_pct": g("ld_pct"),
         "pull_pct": g("pull_pct"), "hr_fb": g("hr_fb"),
-        "xiso": g("xiso"), "xslg": g("xslg"),
+        "xiso": g("xiso"), "xslg": g("xslg"), "iso": g("iso"),
+        "sweet_spot_pct": g("sweet_spot_pct"),
         "brl_pa": g("brl_pa"), "sprint_speed": g("sprint_speed"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),

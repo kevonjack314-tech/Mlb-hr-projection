@@ -381,6 +381,9 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     xiso = max(0.070, min(0.300, xiso))
     xba_est = max(0.210, min(0.300, 0.250 + rng.uniform(-0.03, 0.03)))
     xslg = round(xba_est + xiso, 3)
+    # Real ISO (slugging - avg) tracks xISO; Sweet-Spot% (8-32 deg launch share).
+    iso = round(max(0.080, min(0.320, xiso + rng.uniform(-0.03, 0.03))), 3)
+    sweet_spot_pct = round(max(24.0, min(42.0, 30.0 + (la - 13.0) * 0.4 + rng.uniform(-3.0, 3.0))), 1)
     # Barrels per plate appearance (%): barrel rate scaled by how often the bat
     # puts a ball in play (BBE/PA ~ 0.6). A premier season-long HR predictor.
     brl_pa = round(max(1.5, min(13.0, barrel * rng.uniform(0.55, 0.68))), 1)
@@ -425,6 +428,8 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "hr_fb": round(hr_fb, 1),
         "xiso": round(xiso, 3),
         "xslg": xslg,
+        "iso": iso,
+        "sweet_spot_pct": sweet_spot_pct,
         "brl_pa": brl_pa,
         "sprint_speed": sprint_speed,
         "vs_fb": vs_fb,

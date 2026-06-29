@@ -303,6 +303,31 @@ def test_boxscore_hr_hitters_extraction(monkeypatch):
     assert cam["team"] == "TB" and cam["pitcher_name"] == "Carlos Rodon"
 
 
+def test_ulx_power_checklist_and_environment():
+    from src.ulx import N_POWER_CHECKS, hr_environment, power_checks
+    # An elite power profile passes most checks -> GREEN + smasher.
+    elite = {"barrel_pct": 16, "hard_hit_pct": 50, "xslg": 0.520, "iso": 0.250,
+             "sweet_spot_pct": 34, "avg_ev": 92, "launch_angle": 18,
+             "pull_pct": 42, "hr_fb": 22}
+    r = power_checks(elite)
+    assert r["ulx_checks"] == N_POWER_CHECKS and "GREEN" in r["ulx_grade"]
+    assert r["same_handed_smasher"] is True
+    # A weak profile -> RED.
+    weak = {"barrel_pct": 3, "hard_hit_pct": 30, "xslg": 0.330, "iso": 0.090,
+            "sweet_spot_pct": 25, "avg_ev": 85, "launch_angle": 4,
+            "pull_pct": 28, "hr_fb": 6}
+    assert "RED" in power_checks(weak)["ulx_grade"]
+    # HR hunting mode when several environment signals align.
+    env = hr_environment({"wind_mult": 1.10, "temp_f": 88, "park_factor": 112,
+                          "pitcher_hr9": 1.6, "pitcher_lean": "FB"})
+    assert env["hr_hunting"] is True and env["hr_env_count"] == 5
+
+    # Flows through the scored slate.
+    df = _slate()
+    assert df["ulx_checks"].between(0, 9).all()
+    assert df["ulx_grade"].str.contains("GREEN|YELLOW|RED").all()
+
+
 def test_play_by_play_actual_pitcher(monkeypatch):
     """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
     from src import sources
