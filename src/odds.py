@@ -113,13 +113,16 @@ def parse_event_prop_odds(data: dict, result: dict) -> None:
                     result[prop][nk] = {"odds": int(price), "book": bm.get("title", "book")}
 
 
-@lru_cache(maxsize=8)
-def fetch_live_prop_odds(date_iso: str) -> dict:
-    """{prop: {name_key: {'odds', 'book'}}} for HR / TB(2+) / Hits(1+).
+@lru_cache(maxsize=16)
+def fetch_live_prop_odds(date_iso: str, markets: str | None = None) -> dict:
+    """{prop: {name_key: {'odds', 'book'}}} for the requested markets.
 
-    One odds call per event covers all three markets. Requires ODDS_API_KEY;
-    returns empty maps if missing, blocked, or unparsable.
+    `markets` is a comma-separated Odds API market string; None = all three
+    (HR + TB + Hits). Player-prop credits scale with markets requested, which is
+    why the TB/Hits fetch is **opt-in per tab** — the everyday HR feed requests
+    only `batter_home_runs`. Requires ODDS_API_KEY; empty maps on any failure.
     """
+    req_markets = markets or _ALL_MARKETS
     result: dict = {p: {} for p in PROP_MARKETS}
     key = os.environ.get("ODDS_API_KEY")
     if not key:
@@ -141,7 +144,7 @@ def fetch_live_prop_odds(date_iso: str) -> dict:
             o = requests.get(
                 f"{ODDS_API_BASE}/sports/baseball_mlb/events/{e['id']}/odds",
                 params={"apiKey": key, "regions": "us",
-                        "markets": _ALL_MARKETS, "oddsFormat": "american"},
+                        "markets": req_markets, "oddsFormat": "american"},
                 timeout=TIMEOUT,
             )
             if o.status_code != 200:
@@ -153,8 +156,8 @@ def fetch_live_prop_odds(date_iso: str) -> dict:
 
 
 def fetch_live_hr_odds(date_iso: str) -> dict:
-    """HR view of the multi-prop fetch (kept for attach_odds)."""
-    return fetch_live_prop_odds(date_iso).get("HR", {})
+    """HR-only fetch (single market — the cheapest call; used by attach_odds)."""
+    return fetch_live_prop_odds(date_iso, PROP_MARKETS["HR"][0]).get("HR", {})
 
 
 def attach_prop_lines(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.DataFrame:

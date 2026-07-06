@@ -1135,8 +1135,27 @@ def _prop_boards(df):
                        key=f"dl_prop_{bet}")
 
 
-def tab_parlay(df):
+def tab_parlay(df, end_iso, live_odds):
     st.subheader("🎰 Parlays")
+    fetch_lines = st.toggle(
+        "📡 Fetch real TB/Hits lines", value=False, key="fetch_prop_lines",
+        help="Pull live Total Bases (Over 1.5) and Hits (Over 0.5) prop lines from "
+             "The Odds API for the Mixed Ladder and Prop Boards. Off by default — "
+             "player-prop markets use extra API credits. Needs the live-odds toggle "
+             "(sidebar → Advanced) and an ODDS_API_KEY.",
+    )
+    if fetch_lines:
+        if live_odds:
+            df = attach_prop_lines(df, end_iso, use_live=True)
+            got_live = any(
+                df.get(f"odds_src_{p}", pd.Series(dtype=str)).astype(str)
+                  .str.startswith("LIVE").any() for p in ("TB", "H"))
+            if not got_live:
+                st.caption("⚠️ No live TB/Hits lines came back (check ODDS_API_KEY, "
+                           "quota, or slate timing) — showing estimates.")
+        else:
+            st.caption("⚠️ Turn on **Use live HR odds** in the sidebar (⚙️ Advanced "
+                       "settings) first — that enables the Odds API connection.")
     p1, p2, p3 = st.tabs(["⚾ HR Parlay", "🪜 Mixed Ladder", "📋 Prop Boards"])
     with p1:
         _hr_parlay_builder(df)
@@ -1499,7 +1518,7 @@ def main():
     scored = attach_sp_spot_signal(scored, sp_counts)
     scored = attach_odds(scored, end_iso, use_live=live_odds)
     scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
-    scored = attach_prop_lines(scored, end_iso, use_live=live_odds)  # real TB/Hits lines
+    # Real TB/Hits lines are opt-in inside the Parlays tab (extra API credits).
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)
 
@@ -1540,7 +1559,7 @@ def main():
         else:
             tab_all(filtered)
     with t_parlay:
-        tab_parlay(filtered)
+        tab_parlay(filtered, end_iso, live_odds)
     with t_lineups:
         tab_lineups(filtered, end_iso, prefer_live)
     with t_history:
