@@ -354,6 +354,44 @@ def test_ulx_prop_ladder_and_decision_tree():
     assert s["combined_decimal"] > 1.0 and 0 < s["combined_prob"] < 100
 
 
+def test_live_tb_hits_prop_lines(monkeypatch):
+    """Real TB/Hits lines parse correctly and overlay the estimates with edge."""
+    from src import odds as om
+    from src.odds import attach_odds, attach_prop_lines
+    from src.props import attach_props
+
+    data = {"bookmakers": [
+        {"title": "DK", "markets": [
+            {"key": "batter_total_bases", "outcomes": [
+                {"name": "Over", "description": "Juan Soto", "point": 1.5, "price": 120},
+                {"name": "Under", "description": "Juan Soto", "point": 1.5, "price": -150},
+                {"name": "Over", "description": "Juan Soto", "point": 2.5, "price": 260},
+            ]},
+            {"key": "batter_hits", "outcomes": [
+                {"name": "Over", "description": "Juan Soto", "point": 0.5, "price": -240},
+            ]},
+        ]},
+        {"title": "FD", "markets": [
+            {"key": "batter_total_bases", "outcomes": [
+                {"name": "Over", "description": "Juan Soto", "point": 1.5, "price": 130},
+            ]},
+        ]},
+    ]}
+    result = {p: {} for p in om.PROP_MARKETS}
+    om.parse_event_prop_odds(data, result)
+    assert result["TB"]["juan soto"] == {"odds": 130, "book": "FD"}  # best price, alt line skipped
+    assert result["H"]["juan soto"]["odds"] == -240
+
+    df = attach_props(attach_odds(_slate(), "2026-06-18", use_live=False))
+    om.fetch_live_prop_odds.cache_clear()
+    monkeypatch.setattr(om, "fetch_live_prop_odds", lambda d: result)
+    out = attach_prop_lines(df, "2026-06-18", use_live=True)
+    soto = out[out["player"] == "Juan Soto"].iloc[0]
+    assert soto["odds_TB"] == 130 and soto["odds_src_TB"] == "LIVE · FD"
+    assert soto["edge_TB_pct"] == soto["edge_TB_pct"]           # edge computed (not NaN)
+    assert (out[out["player"] != "Juan Soto"]["odds_src_TB"] == "est").all()
+
+
 def test_play_by_play_actual_pitcher(monkeypatch):
     """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
     from src import sources
