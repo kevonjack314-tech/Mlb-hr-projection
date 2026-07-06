@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -37,7 +38,7 @@ from src.lineup import (
     player_spot_hr,
     update_log_from_history,
 )
-from src.odds import attach_odds, format_american
+from src.odds import attach_odds, attach_prop_lines, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
 from src.pitchers import attach_sp_spot_signal, sp_spot_counts_for
 from src.props import BET_LABEL, BET_TYPES, attach_props, build_ladder_parlay
@@ -1063,11 +1064,13 @@ def _mixed_ladder(df):
     for i, (_, leg) in enumerate(legs.iterrows()):
         with cols[i % len(cols)]:
             with st.container(border=True):
-                st.markdown(f"**{BET_LABEL[leg['bet']]}**")
+                live_tag = " 🟢LIVE" if leg.get("bet_live") else ""
+                st.markdown(f"**{BET_LABEL[leg['bet']]}**{live_tag}")
                 st.markdown(f"**{leg['player']}** · {leg['team']} vs {leg['opponent']}")
                 m1, m2 = st.columns(2)
                 m1.metric("Est. cash", f"{leg['bet_prob']*100:.0f}%")
-                m2.metric("Est. odds", format_american(leg["bet_odds"]))
+                m2.metric("Odds" if leg.get("bet_live") else "Est. odds",
+                          format_american(leg["bet_odds"]))
                 spot = leg.get("lineup_spot")
                 spot_txt = f"bats {int(spot)} · " if pd.notna(spot) else ""
                 st.caption(f"{spot_txt}fit {leg['bet_suit']:.0f}/100")
@@ -1089,15 +1092,25 @@ def _prop_boards(df):
     bet = st.selectbox("Bet type", BET_TYPES, format_func=BET_LABEL.get, key="prop_bet")
     b = df.copy()
     b = b.sort_values(f"suit_{bet}", ascending=False).head(30)
+    src_col = b.get(f"odds_src_{bet}")
+    has_live = src_col is not None and src_col.astype(str).str.startswith("LIVE").any()
     show = pd.DataFrame({
         "Player": b["player"], "Team": b["team"], "Opp": b["opponent"],
         "Spot": b["lineup_spot"].astype("Int64"),
         "Fit": b[f"suit_{bet}"].round(0),
-        "Est. cash %": (b[f"prob_{bet}"] * 100).round(0),
-        "Est. odds": b[f"odds_{bet}"],
+        "Cash %": (b[f"prob_{bet}"] * 100).round(0),
+        "Odds": b[f"odds_{bet}"],
+        "Line": (src_col.map(lambda s: "🟢 " + s.split("· ")[-1]
+                             if str(s).startswith("LIVE") else "🟡 est")
+                 if src_col is not None else "🟡 est"),
+        "Edge%": (b[f"edge_{bet}_pct"] if f"edge_{bet}_pct" in b.columns
+                  else pd.Series(np.nan, index=b.index)),
         "ULX Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
         "Why": b["best_bet_reason"],
     })
+    if has_live:
+        st.caption("🟢 Real book lines loaded for this market — **Edge%** = model "
+                   "cash prob − book implied (positive = +EV).")
     st.dataframe(
         show, hide_index=True, use_container_width=True,
         height=min(560, 60 + 35 * min(len(show), 14)),
@@ -1105,10 +1118,16 @@ def _prop_boards(df):
             "Fit": st.column_config.ProgressColumn(
                 "Fit", help="How well this bat fits the bet type (ULX drivers + lineup spot).",
                 min_value=0, max_value=100, format="%.0f"),
-            "Est. cash %": st.column_config.NumberColumn(
-                "Est. cash %", help="ULX pyramid base rate scaled by the bat's fit "
-                "(modeled estimate; HR uses the real model probability).", format="%.0f%%"),
-            "Est. odds": st.column_config.NumberColumn("Est. odds", format="%+d"),
+            "Cash %": st.column_config.NumberColumn(
+                "Cash %", help="Model cash probability (ULX pyramid base rate scaled "
+                "by fit; HR uses the real model probability).", format="%.0f%%"),
+            "Odds": st.column_config.NumberColumn(
+                "Odds", help="Real book line when 🟢 LIVE (best price across books, "
+                "TB = Over 1.5, Hits = Over 0.5), else the modeled estimate.",
+                format="%+d"),
+            "Edge%": st.column_config.NumberColumn(
+                "Edge%", help="Model cash prob − book implied prob at the live line "
+                "(only for 🟢 LIVE rows). Positive = +EV.", format="%+.1f"),
         },
     )
     st.download_button("⬇️ Export board to CSV", show.to_csv(index=False).encode(),
@@ -1480,6 +1499,7 @@ def main():
     scored = attach_sp_spot_signal(scored, sp_counts)
     scored = attach_odds(scored, end_iso, use_live=live_odds)
     scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
+    scored = attach_prop_lines(scored, end_iso, use_live=live_odds)  # real TB/Hits lines
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)
 

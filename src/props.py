@@ -32,7 +32,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .odds import prob_to_american
+from .odds import american_to_decimal, prob_to_american
 
 BET_TYPES = ["HR", "TB", "H", "R", "RBI", "2B", "SB"]
 
@@ -196,7 +196,13 @@ def build_ladder_parlay(df: pd.DataFrame, n_legs: int = 5) -> dict:
         d = pick.to_dict()
         d["bet"] = bet
         d["bet_prob"] = float(pick[f"prob_{bet}"])
-        d["bet_odds"] = int(pick[f"odds_{bet}"])
+        if bet == "HR" and "book_odds" in pick.index:
+            # HR uses the real book/model-implied price from the odds layer.
+            d["bet_odds"] = int(pick["book_odds"])
+            d["bet_live"] = bool(pick.get("odds_is_live", False))
+        else:
+            d["bet_odds"] = int(pick[f"odds_{bet}"])
+            d["bet_live"] = str(pick.get(f"odds_src_{bet}", "est")).startswith("LIVE")
         d["bet_suit"] = float(pick[col])
         legs.append(d)
         used_games.add(pick["game"])
@@ -205,12 +211,16 @@ def build_ladder_parlay(df: pd.DataFrame, n_legs: int = 5) -> dict:
     if legs_df.empty:
         return {"legs": legs_df, "summary": {}}
     combined_prob = float(legs_df["bet_prob"].prod())
-    dec = float((1.0 / legs_df["bet_prob"]).prod())
+    # Payout from the actual leg odds (live book lines when overlaid, else
+    # modeled estimates); win % from the model cash probabilities.
+    dec = float(legs_df["bet_odds"].map(american_to_decimal).prod())
+    any_live = bool(legs_df.get("bet_live", pd.Series([False])).any())
     summary = {
         "n_legs": len(legs_df),
         "combined_prob": round(combined_prob * 100, 1),
         "combined_decimal": round(dec, 2),
-        "combined_american": prob_to_american(combined_prob),
+        "combined_american": prob_to_american(1.0 / dec) if dec > 1 else 0,
         "payout_per_10": round(10 * (dec - 1), 2),
+        "any_live": any_live,
     }
     return {"legs": legs_df, "summary": summary}

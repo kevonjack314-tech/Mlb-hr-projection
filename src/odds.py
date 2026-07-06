@@ -73,16 +73,57 @@ def format_american(a) -> str:
 # --------------------------------------------------------------------------- #
 # Live odds (The Odds API)
 # --------------------------------------------------------------------------- #
-@lru_cache(maxsize=8)
-def fetch_live_hr_odds(date_iso: str) -> dict:
-    """{normalized_player_name: {'odds': american, 'book': name}} or {} on failure.
+# prop -> (The Odds API market key, the standard Over line for our prop def).
+# HR = Over 0.5 HRs · TB = Over 1.5 total bases (2+ TB) · H = Over 0.5 hits (1+).
+PROP_MARKETS = {
+    "HR": ("batter_home_runs", 0.5),
+    "TB": ("batter_total_bases", 1.5),
+    "H": ("batter_hits", 0.5),
+}
+_MARKET_TO_PROP = {mk: p for p, (mk, _pt) in PROP_MARKETS.items()}
+_ALL_MARKETS = ",".join(mk for mk, _pt in PROP_MARKETS.values())
 
-    Keeps the best (longest) available price per player across books. Requires an
-    ODDS_API_KEY env var; returns {} if missing, blocked, or unparled.
+
+def parse_event_prop_odds(data: dict, result: dict) -> None:
+    """Fold one event's bookmaker odds into result {prop: {name_key: {...}}}.
+
+    Keeps the best (longest) Over/Yes price per player per prop, only at the
+    standard line for that prop (e.g. TB Over exactly 1.5).
     """
+    for bm in data.get("bookmakers", []):
+        for mk in bm.get("markets", []):
+            prop = _MARKET_TO_PROP.get(mk.get("key"))
+            if prop is None:
+                continue
+            target = PROP_MARKETS[prop][1]
+            for out in mk.get("outcomes", []):
+                side = str(out.get("name", "")).lower()
+                if side in ("under", "no"):
+                    continue
+                point = out.get("point")
+                if point is not None and abs(float(point) - target) > 0.01:
+                    continue          # alt line (e.g. TB 2.5) — skip
+                player = out.get("description") or out.get("name")
+                price = out.get("price")
+                if player is None or price is None:
+                    continue
+                nk = normalize_name(player)
+                prev = result[prop].get(nk)
+                if prev is None or price > prev["odds"]:
+                    result[prop][nk] = {"odds": int(price), "book": bm.get("title", "book")}
+
+
+@lru_cache(maxsize=8)
+def fetch_live_prop_odds(date_iso: str) -> dict:
+    """{prop: {name_key: {'odds', 'book'}}} for HR / TB(2+) / Hits(1+).
+
+    One odds call per event covers all three markets. Requires ODDS_API_KEY;
+    returns empty maps if missing, blocked, or unparsable.
+    """
+    result: dict = {p: {} for p in PROP_MARKETS}
     key = os.environ.get("ODDS_API_KEY")
     if not key:
-        return {}
+        return result
     try:
         ev = requests.get(
             f"{ODDS_API_BASE}/sports/baseball_mlb/events",
@@ -91,9 +132,8 @@ def fetch_live_hr_odds(date_iso: str) -> dict:
         ev.raise_for_status()
         events = ev.json()
     except Exception:
-        return {}
+        return result
 
-    result: dict = {}
     for e in events:
         if not str(e.get("commence_time", "")).startswith(date_iso):
             continue
@@ -101,32 +141,51 @@ def fetch_live_hr_odds(date_iso: str) -> dict:
             o = requests.get(
                 f"{ODDS_API_BASE}/sports/baseball_mlb/events/{e['id']}/odds",
                 params={"apiKey": key, "regions": "us",
-                        "markets": "batter_home_runs", "oddsFormat": "american"},
+                        "markets": _ALL_MARKETS, "oddsFormat": "american"},
                 timeout=TIMEOUT,
             )
             if o.status_code != 200:
                 continue
-            data = o.json()
+            parse_event_prop_odds(o.json(), result)
         except Exception:
             continue
-        for bm in data.get("bookmakers", []):
-            for mk in bm.get("markets", []):
-                if mk.get("key") != "batter_home_runs":
-                    continue
-                for out in mk.get("outcomes", []):
-                    # "Over"/"Yes" is the to-hit-a-HR side; player is in description.
-                    side = str(out.get("name", "")).lower()
-                    if side in ("under", "no"):
-                        continue
-                    player = out.get("description") or out.get("name")
-                    price = out.get("price")
-                    if player is None or price is None:
-                        continue
-                    nk = normalize_name(player)
-                    prev = result.get(nk)
-                    if prev is None or price > prev["odds"]:
-                        result[nk] = {"odds": int(price), "book": bm.get("title", "book")}
     return result
+
+
+def fetch_live_hr_odds(date_iso: str) -> dict:
+    """HR view of the multi-prop fetch (kept for attach_odds)."""
+    return fetch_live_prop_odds(date_iso).get("HR", {})
+
+
+def attach_prop_lines(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.DataFrame:
+    """Overlay real TB / Hits prop lines onto the slate's estimated odds.
+
+    Where a live line exists: odds_TB / odds_H are replaced with the real book
+    price, odds_src_* records the book, and edge_*_pct = model cash prob − the
+    book's implied prob (positive = +EV). Otherwise the modeled estimates stand.
+    """
+    df = df.copy()
+    live = fetch_live_prop_odds(date_iso) if use_live else {p: {} for p in PROP_MARKETS}
+    for prop in ("TB", "H"):
+        if f"odds_{prop}" not in df.columns:
+            continue
+        odds_col, src_col, edge_col = [], [], []
+        for _, row in df.iterrows():
+            hit = live[prop].get(normalize_name(row["player"]))
+            if hit:
+                odds_col.append(hit["odds"])
+                src_col.append(f"LIVE · {hit['book']}")
+                edge_col.append(round(
+                    (float(row.get(f"prob_{prop}", 0.0))
+                     - american_to_prob(hit["odds"])) * 100, 1))
+            else:
+                odds_col.append(int(row[f"odds_{prop}"]))
+                src_col.append("est")
+                edge_col.append(np.nan)
+        df[f"odds_{prop}"] = odds_col
+        df[f"odds_src_{prop}"] = src_col
+        df[f"edge_{prop}_pct"] = edge_col
+    return df
 
 
 def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.DataFrame:

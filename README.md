@@ -159,6 +159,13 @@ is allowlisted, otherwise a **model-implied** market price (the vig-free fair pr
 shaded by a typical HR-prop hold). **Edge%** = model HR% − book-implied HR%
 (positive = +EV); it powers the Best-value parlay strategy and the ticket EV.
 
+**Real Total Bases & Hits lines** ride the same fetch: one odds call per event
+covers `batter_home_runs` + `batter_total_bases` (Over **1.5** = our 2+ TB prop)
++ `batter_hits` (Over **0.5** = 1+ hit), keeping the best price across books and
+skipping alt lines. Where a live line exists, the Prop Boards and the 🪜 Mixed
+Ladder show the real price (🟢) with **Edge%** = model cash prob − book implied;
+otherwise the modeled estimate (🟡) stands.
+
 ### Features
 - **Leaderboard cards** with key metrics and a one-line rationale per player.
 - **Bar charts** of the top bats by each score.
