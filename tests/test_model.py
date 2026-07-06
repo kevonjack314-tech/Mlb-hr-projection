@@ -392,6 +392,34 @@ def test_live_tb_hits_prop_lines(monkeypatch):
     assert (out[out["player"] != "Juan Soto"]["odds_src_TB"] == "est").all()
 
 
+def test_prop_lines_are_opt_in(monkeypatch):
+    """The everyday HR feed requests 1 market; the opt-in TB/Hits fetch requests 3."""
+    from src import odds as om
+
+    calls = []
+
+    class FakeResp:
+        status_code = 200
+        def __init__(self, payload): self._p = payload
+        def raise_for_status(self): pass
+        def json(self): return self._p
+
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/events"):
+            return FakeResp([{"id": "e1", "commence_time": "2026-06-29T23:00:00Z"}])
+        calls.append((params or {}).get("markets"))
+        return FakeResp({"bookmakers": []})
+
+    monkeypatch.setenv("ODDS_API_KEY", "test")
+    monkeypatch.setattr(om.requests, "get", fake_get)
+    om.fetch_live_prop_odds.cache_clear()
+    om.fetch_live_hr_odds("2026-06-29")
+    om.fetch_live_prop_odds("2026-06-29")
+    om.fetch_live_prop_odds.cache_clear()
+    assert calls[0] == "batter_home_runs"
+    assert calls[1] == "batter_home_runs,batter_total_bases,batter_hits"
+
+
 def test_play_by_play_actual_pitcher(monkeypatch):
     """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
     from src import sources

@@ -159,12 +159,14 @@ is allowlisted, otherwise a **model-implied** market price (the vig-free fair pr
 shaded by a typical HR-prop hold). **Edge%** = model HR% − book-implied HR%
 (positive = +EV); it powers the Best-value parlay strategy and the ticket EV.
 
-**Real Total Bases & Hits lines** ride the same fetch: one odds call per event
-covers `batter_home_runs` + `batter_total_bases` (Over **1.5** = our 2+ TB prop)
-+ `batter_hits` (Over **0.5** = 1+ hit), keeping the best price across books and
-skipping alt lines. Where a live line exists, the Prop Boards and the 🪜 Mixed
-Ladder show the real price (🟢) with **Edge%** = model cash prob − book implied;
-otherwise the modeled estimate (🟡) stands.
+**Real Total Bases & Hits lines** are **opt-in per tab** to conserve API credits:
+the everyday HR feed requests only the `batter_home_runs` market (cheapest), and
+the **📡 Fetch real TB/Hits lines** toggle inside the 🎰 Parlays tab pulls
+`batter_total_bases` (Over **1.5** = our 2+ TB prop) + `batter_hits` (Over **0.5**
+= 1+ hit) in one call per event — best price across books, alt lines skipped.
+Where a live line exists, the Prop Boards and 🪜 Mixed Ladder show the real price
+(🟢) with **Edge%** = model cash prob − book implied; otherwise the modeled
+estimate (🟡) stands.
 
 ### Features
 - **Leaderboard cards** with key metrics and a one-line rationale per player.
