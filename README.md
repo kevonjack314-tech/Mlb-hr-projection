@@ -109,6 +109,25 @@ when available, else estimated. It feeds the model three ways:
   log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
   3–4 — exactly where real middle-of-the-order power lives.)
 
+### The prop ladder & betting pyramid (instilled)
+
+`src/props.py` encodes the ULX betting syllabus — *"don't get stuck on HRs"*:
+- **Bet-type suitability (0–100)** per hitter for **HR · Total Bases · Hits ·
+  Runs · RBIs · Doubles · Stolen Bases**, from the ULX cheat-sheet drivers
+  (e.g. TB = hits+power+lineup position; SB = sprint speed gates everything;
+  R = top of the order + on-base; RBI = 3-5 traffic + slug) and the
+  **manager's lineup-spot roles** (leadoff sets the table, 3-4 heart of order,
+  7-9 hidden value zone).
+- **Estimated cash %** per bet type = the ULX hit-rate pyramid baselines
+  (Hits 70-80% … HR 8-15%) scaled by the bat's fit (HR uses the real model
+  probability). Labeled as estimates.
+- **ULX Best Bet decision tree** per player: elite HR profile → HR, else
+  doubles → Runs → SB → Hits/TB, else **pass the player**.
+- **🪜 Mixed Ladder** in the Parlays tab: one leg per bet type from different
+  games, mirroring the pyramid mix (~10% HR / XBH / TB / SB / volume base).
+- **Fade recency** (ULX 106) is already structural: underlying quality carries
+  the biggest weight (0.34) while recent form is capped and only 0.16.
+
 ### ULX methodology (instilled)
 
 The model encodes the ULX playbook ("bet the profile, not the name") in `src/ulx.py`:

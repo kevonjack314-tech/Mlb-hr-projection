@@ -40,6 +40,7 @@ from src.lineup import (
 from src.odds import attach_odds, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
 from src.pitchers import attach_sp_spot_signal, sp_spot_counts_for
+from src.props import BET_LABEL, BET_TYPES, attach_props, build_ladder_parlay
 from src.sources import get_slate
 
 st.set_page_config(
@@ -998,13 +999,12 @@ def _render_parlay(result, stake):
                        file_name="hr_parlay.csv", mime="text/csv")
 
 
-def tab_parlay(df):
-    st.subheader("🎰 HR Parlay Builder")
+def _hr_parlay_builder(df):
     st.caption(
-        "Build parlays with **roles, not names** (the ULX formula): an **⚓ Anchor** "
+        "Build HR parlays with **roles, not names** (the ULX formula): an **⚓ Anchor** "
         "(highest-confidence bat), **💰 Value** bats (underpriced profiles), and "
         "**🚀 Deep-Space Longshots** (overlooked ceiling). Diversified across games & "
-        "archetypes, graded on a 10-point checklist. *Research/entertainment only.*"
+        "archetypes, graded on the ULX checklist. *Research/entertainment only.*"
     )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1040,6 +1040,91 @@ def tab_parlay(df):
         )
         if choices:
             _render_parlay(summarize_selection(df, choices), stake)
+
+
+def _mixed_ladder(df):
+    st.caption(
+        "The **ULX betting pyramid** — *don't get stuck on HRs*. One leg per bet "
+        "type (💣 HR · 🟧 Double · 🟩 Total Bases · 🏃 Stolen Base · 🔷 Run), each from a "
+        "different game: high-risk top, volume base. Non-HR cash rates are "
+        "**modeled estimates** from the ULX hit-rate pyramid scaled by each bat's "
+        "profile fit."
+    )
+    n = st.slider("Legs", 2, 5, 5, key="ladder_legs",
+                  help="5 = the full pyramid (HR + 2B + TB + SB + Run).")
+    if st.button("🎲 Rebuild ladder", key="ladder_btn"):
+        st.session_state["ladder_seed"] = st.session_state.get("ladder_seed", 0) + 1
+    res = build_ladder_parlay(df, n_legs=n)
+    legs, s = res["legs"], res["summary"]
+    if legs.empty:
+        st.warning("Not enough qualifying bats for a ladder today.")
+        return
+    cols = st.columns(min(len(legs), 3))
+    for i, (_, leg) in enumerate(legs.iterrows()):
+        with cols[i % len(cols)]:
+            with st.container(border=True):
+                st.markdown(f"**{BET_LABEL[leg['bet']]}**")
+                st.markdown(f"**{leg['player']}** · {leg['team']} vs {leg['opponent']}")
+                m1, m2 = st.columns(2)
+                m1.metric("Est. cash", f"{leg['bet_prob']*100:.0f}%")
+                m2.metric("Est. odds", format_american(leg["bet_odds"]))
+                spot = leg.get("lineup_spot")
+                spot_txt = f"bats {int(spot)} · " if pd.notna(spot) else ""
+                st.caption(f"{spot_txt}fit {leg['bet_suit']:.0f}/100")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ticket (est.)", format_american(s["combined_american"]))
+    c2.metric("Est. win %", f"{s['combined_prob']}%")
+    c3.metric("$10 pays (est.)", f"${s['payout_per_10']:,.0f}")
+    st.caption("💡 ULX golden rules: never bet the same thing in every game · stack "
+               "ways to cash · volume is king at the base of the ticket.")
+
+
+def _prop_boards(df):
+    st.caption(
+        "**The prop ladder** — pick a bet type and see which bats fit it best "
+        "(ULX cheat-sheet drivers + lineup-spot role). **ULX Best Bet** runs each "
+        "player through the decision tree: elite HR profile → HR, else 2B → Run → "
+        "SB → Hits/TB, else pass."
+    )
+    bet = st.selectbox("Bet type", BET_TYPES, format_func=BET_LABEL.get, key="prop_bet")
+    b = df.copy()
+    b = b.sort_values(f"suit_{bet}", ascending=False).head(30)
+    show = pd.DataFrame({
+        "Player": b["player"], "Team": b["team"], "Opp": b["opponent"],
+        "Spot": b["lineup_spot"].astype("Int64"),
+        "Fit": b[f"suit_{bet}"].round(0),
+        "Est. cash %": (b[f"prob_{bet}"] * 100).round(0),
+        "Est. odds": b[f"odds_{bet}"],
+        "ULX Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
+        "Why": b["best_bet_reason"],
+    })
+    st.dataframe(
+        show, hide_index=True, use_container_width=True,
+        height=min(560, 60 + 35 * min(len(show), 14)),
+        column_config={
+            "Fit": st.column_config.ProgressColumn(
+                "Fit", help="How well this bat fits the bet type (ULX drivers + lineup spot).",
+                min_value=0, max_value=100, format="%.0f"),
+            "Est. cash %": st.column_config.NumberColumn(
+                "Est. cash %", help="ULX pyramid base rate scaled by the bat's fit "
+                "(modeled estimate; HR uses the real model probability).", format="%.0f%%"),
+            "Est. odds": st.column_config.NumberColumn("Est. odds", format="%+d"),
+        },
+    )
+    st.download_button("⬇️ Export board to CSV", show.to_csv(index=False).encode(),
+                       file_name=f"prop_board_{bet}.csv", mime="text/csv",
+                       key=f"dl_prop_{bet}")
+
+
+def tab_parlay(df):
+    st.subheader("🎰 Parlays")
+    p1, p2, p3 = st.tabs(["⚾ HR Parlay", "🪜 Mixed Ladder", "📋 Prop Boards"])
+    with p1:
+        _hr_parlay_builder(df)
+    with p2:
+        _mixed_ladder(df)
+    with p3:
+        _prop_boards(df)
 
 
 def _build_hr_insight(row) -> str:
@@ -1346,18 +1431,16 @@ def main():
     with st.expander("👋 New here? How to use this", expanded=False):
         st.markdown(
             "1. **Pick a date** in the sidebar (defaults to today).\n"
-            "2. Check **⭐ Today's top picks** below for the headline plays.\n"
-            "3. Browse the tabs: **🚀 Longshots** (boom-or-bust), **🎯 Consistent** "
-            "(safe power), **🕵️ Sneaky** (value), **📊 All** (full board).\n"
-            "4. **🎰 Parlay Builder** auto-builds smart 1–5 leg HR parlays; "
-            "**💎 Value Finder** lists the best price edges; **📈 Trends** shows who's "
-            "been homering and why.\n"
-            "5. Toggle **✨ Simple view** off (sidebar) to see every advanced metric, "
-            "and hover any column header for a plain-language definition.\n\n"
+            "2. **🏠 Today** — the HR of the Day and headline picks.\n"
+            "3. **🎯 Picks** — Longshots, Consistent, Sneaky, Value, or the full board.\n"
+            "4. **🎰 Parlays** — HR parlays, the **🪜 Mixed Ladder** (HR + doubles + "
+            "total bases + steals + runs, per the ULX pyramid), and per-bet **Prop "
+            "Boards** with each player's ULX Best Bet.\n"
+            "5. **🧾 Lineups** & **📚 History** — today's orders and who's been homering.\n\n"
             "📲 **Install it like an app:** open this page in your phone browser → "
-            "**Share / ⋮ menu → Add to Home Screen**. It then launches full-screen "
-            "with an icon, just like a native app.\n\n"
-            "_Tip: tap the **»** (top-left) to open the date picker & settings._\n\n"
+            "**Share / ⋮ menu → Add to Home Screen**.\n\n"
+            "_Tip: tap the **»** (top-left) for the date picker & settings; turn off "
+            "✨ Simple view there for every advanced metric._\n\n"
             "_Projections are model estimates for research/entertainment — not betting advice._"
         )
 
@@ -1396,6 +1479,7 @@ def main():
     sp_counts = load_sp_spot_counts(end_iso, prefer_live, _pairs)
     scored = attach_sp_spot_signal(scored, sp_counts)
     scored = attach_odds(scored, end_iso, use_live=live_odds)
+    scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)
 
@@ -1405,38 +1489,49 @@ def main():
         return
 
     odds_badge = "🟢 LIVE" if (filtered.get("odds_is_live", pd.Series([False])).any()) else "🟡 model-implied"
-    st.markdown(f"**{len(filtered)}** hitters · **{filtered['game'].nunique()}** games · "
-                f"HR odds: {odds_badge}")
+    st.caption(f"{len(filtered)} hitters · {filtered['game'].nunique()} games · "
+               f"HR odds: {odds_badge}")
 
-    render_hr_of_day(filtered)
-    st.markdown("")
-    render_top_picks(filtered)
-    st.markdown("")
-
-    t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs(
-        ["🚀 Best Longshots", "🎯 Consistent HR Hitters",
-         "🕵️ Sneaky HR Chances", "📊 All Combined + Best Metrics",
-         "🧾 Lineups", "📋 Previous HRs", "📈 HR Trends & Backtest",
-         "🎰 Parlay Builder", "💎 Value Finder"]
+    # 5 simple top-level tabs; deeper views live inside each one.
+    t_today, t_picks, t_parlay, t_lineups, t_history = st.tabs(
+        ["🏠 Today", "🎯 Picks", "🎰 Parlays", "🧾 Lineups", "📚 History"]
     )
-    with t1:
-        tab_longshots(filtered)
-    with t2:
-        tab_consistent(filtered)
-    with t3:
-        tab_sneaky(filtered)
-    with t4:
-        tab_all(filtered)
-    with t5:
-        tab_lineups(filtered, end_iso, prefer_live)
-    with t6:
-        tab_previous_hrs(history)
-    with t7:
-        tab_trends(history, filtered)
-    with t8:
+    with t_today:
+        render_hr_of_day(filtered)
+        st.markdown("")
+        render_top_picks(filtered)
+        st.caption("Head to **🎯 Picks** for the full boards, **🎰 Parlays** to build "
+                   "tickets, **🧾 Lineups** for today's orders, **📚 History** for "
+                   "previous HRs & trends.")
+    with t_picks:
+        view = st.radio(
+            "View", ["🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
+                     "💎 Value Finder", "📊 Full Board"],
+            horizontal=True, label_visibility="collapsed", key="picks_view",
+        )
+        if view == "🚀 Longshots":
+            tab_longshots(filtered)
+        elif view == "🎯 Consistent":
+            tab_consistent(filtered)
+        elif view == "🕵️ Sneaky":
+            tab_sneaky(filtered)
+        elif view == "💎 Value Finder":
+            tab_value_finder(filtered)
+        else:
+            tab_all(filtered)
+    with t_parlay:
         tab_parlay(filtered)
-    with t9:
-        tab_value_finder(filtered)
+    with t_lineups:
+        tab_lineups(filtered, end_iso, prefer_live)
+    with t_history:
+        hview = st.radio(
+            "View", ["📋 Previous HRs", "📈 Trends & Backtest"],
+            horizontal=True, label_visibility="collapsed", key="hist_view",
+        )
+        if hview == "📋 Previous HRs":
+            tab_previous_hrs(history)
+        else:
+            tab_trends(history, filtered)
 
 
 if __name__ == "__main__":
