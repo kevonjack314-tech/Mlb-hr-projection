@@ -328,6 +328,32 @@ def test_ulx_power_checklist_and_environment():
     assert df["ulx_grade"].str.contains("GREEN|YELLOW|RED").all()
 
 
+def test_ulx_prop_ladder_and_decision_tree():
+    from src.odds import attach_odds
+    from src.props import BET_TYPES, attach_props, build_ladder_parlay
+
+    df = attach_props(attach_odds(_slate(), "2026-06-18", use_live=False))
+    for b in BET_TYPES:
+        assert df[f"suit_{b}"].between(0, 100).all()
+        assert df[f"prob_{b}"].between(0.0, 0.9).all()
+    # Decision tree outputs valid recommendations.
+    assert df["best_bet"].isin(BET_TYPES + ["PASS"]).all()
+    # HR recommendation requires an elite ULX profile.
+    hr_picks = df[df["best_bet"] == "HR"]
+    assert (hr_picks["ulx_checks"] >= 7).all()
+    # SB recommendation requires real speed.
+    sb_picks = df[df["best_bet"] == "SB"]
+    if len(sb_picks):
+        assert (sb_picks["sprint_speed"] >= 28).all()
+
+    # Mixed ladder: one leg per bet type, all from different games.
+    res = build_ladder_parlay(df, n_legs=5)
+    legs, s = res["legs"], res["summary"]
+    assert len(legs) == 5
+    assert legs["bet"].nunique() == 5 and legs["game"].nunique() == 5
+    assert s["combined_decimal"] > 1.0 and 0 < s["combined_prob"] < 100
+
+
 def test_play_by_play_actual_pitcher(monkeypatch):
     """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
     from src import sources
