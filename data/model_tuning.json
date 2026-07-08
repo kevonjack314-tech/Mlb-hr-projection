@@ -1,0 +1,12 @@
+{
+ "n": 274,
+ "bins": [],
+ "brier": 0.08495,
+ "updated": "2026-07-08",
+ "role_factors": {},
+ "role_n": {
+  "Anchor": 1,
+  "Longshot": 1,
+  "Value": 1
+ }
+}
