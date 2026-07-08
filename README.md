@@ -141,6 +141,30 @@ The model encodes the ULX playbook ("bet the profile, not the name") in `src/ulx
 - **HR environment / "🔥 HR Hunting Mode"** — wind out, warm temps, hitter park, and
   a homer-prone / fly-ball starter; flagged per game in the Lineups tab.
 
+### 🤖 Daily self-improvement (gets more accurate every day)
+
+`src/tuning.py` + `scripts/daily_improve.py`, run every morning by the daily
+GitHub Actions workflow (open network → real games):
+
+1. **Grade yesterday** — rebuild the slate pre-game (live lineups + metrics),
+   log every hitter's predicted HR probability, the **parlay legs the builder
+   would have picked** (by role) and the top-5 picks, joined to the **actual
+   HR outcomes from box scores** → appended to `data/eval_log.csv` (de-duped;
+   simulated days are never logged).
+2. **Retune** — refit on the FULL accumulated record and commit
+   `data/model_tuning.json`:
+   - a **monotonic probability-calibration curve** the model applies to every
+     game HR probability at scoring time (identity until ≥300 real hitter-days,
+     damped by sample size, clamped ±40%), and
+   - **per-role parlay-leg reliability factors** (real hit rate ÷ predicted, per
+     Anchor/Value/Longshot) that recalibrate future **ticket win% and EV**.
+3. **Show the receipts** — the Trends view has a "🤖 Self-improvement track
+   record" panel: days graded, Brier score, calibration status, and real
+   per-role parlay-leg hit rates.
+
+So every day of real games makes the probabilities, the edges, and the parlay
+selections a little sharper — automatically.
+
 ### Featured picks
 
 - **🔒 HR of the Day** — a single highest-**confidence** lock at the top of the page,

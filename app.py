@@ -904,6 +904,34 @@ def tab_trends(history, projection_slate):
             use_container_width=True,
         )
 
+    # --- Daily self-improvement track record (real outcomes, grows every day) ---
+    from src.tuning import _load_tuning, brier_score, load_eval_log
+    ev_log = load_eval_log()
+    if not ev_log.empty:
+        st.markdown("##### 🤖 Self-improvement track record")
+        tun = _load_tuning()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Days graded", int(ev_log["date"].nunique()))
+        c2.metric("Hitter-days", len(ev_log))
+        b = brier_score(ev_log)
+        c3.metric("Brier score", b if b is not None else "—",
+                  help="Mean squared error of the HR probabilities vs reality — lower is better (~0.10 is solid for HR props).")
+        cal_on = bool(tun.get("bins"))
+        c4.metric("Auto-calibration", "🟢 active" if cal_on else "🟡 warming up",
+                  help="Once ≥300 real hitter-days are logged, the model re-maps its "
+                       "probabilities through the observed outcome curve — refit daily.")
+        if "parlay_role" in ev_log.columns:
+            legs = ev_log[ev_log["parlay_role"].astype(str).isin(["Anchor", "Value", "Longshot"])]
+            if len(legs):
+                rr = legs.groupby("parlay_role")["hit_hr"].agg(["mean", "count"])
+                bits = [f"{ROLE_EMOJI.get(r, '')} {r}: {v['mean']*100:.0f}% hit ({int(v['count'])} legs)"
+                        for r, v in rr.iterrows()]
+                st.caption("**Parlay legs graded:** " + " · ".join(bits) +
+                           " — these real hit rates recalibrate future ticket win% per role.")
+        st.caption("Graded daily by GitHub Actions against real box scores; the "
+                   "calibration + parlay role factors are refit on the full record "
+                   "every morning, so the model gets a little sharper each day.")
+
     if calib is not None and not calib.empty:
         st.markdown("##### 🎯 Model calibration — predicted vs. actual HR rate")
         st.caption(
