@@ -28,6 +28,7 @@ from .parks import (
     temp_hr_multiplier,
     wind_hr_multiplier,
 )
+from .tuning import calibrate_game_prob
 from .ulx import hr_environment, power_checks
 
 # League average HR per plate appearance (modern run environment).
@@ -362,6 +363,9 @@ def score_row(row: pd.Series) -> dict:
     pa = expected_pa(row.get("lineup_spot"))
     out["expected_pa"] = round(pa, 2)
     p_game = 1.0 - (1.0 - p_adj) ** pa
+    # Daily self-improvement: map through the real-outcome calibration curve
+    # (identity until enough real days are logged; see src/tuning.py).
+    p_game = calibrate_game_prob(p_game)
     out["hr_prob_pa"] = round(p_adj, 4)
     out["hr_prob_game"] = round(p_game, 4)
     out["xhr"] = round(p_adj * pa, 3)  # expected HR in the game

@@ -420,6 +420,50 @@ def test_prop_lines_are_opt_in(monkeypatch):
     assert calls[1] == "batter_home_runs,batter_total_bases,batter_hits"
 
 
+def test_daily_self_improvement_calibration(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from src import tuning
+
+    monkeypatch.setattr(tuning, "EVAL_LOG_PATH", str(tmp_path / "eval.csv"))
+    monkeypatch.setattr(tuning, "TUNING_PATH", str(tmp_path / "tune.json"))
+    tuning.reload_tuning()
+
+    # Synthetic record: model is overconfident (reality = 70% of prediction).
+    rng = np.random.default_rng(7)
+    pred = rng.uniform(0.05, 0.30, 800)
+    hit = (rng.random(800) < pred * 0.7).astype(int)
+    log = pd.DataFrame({
+        "date": "2026-07-01", "player": [f"P{i}" for i in range(800)],
+        "team": "X", "lineup_spot": 4, "hr_prob_game": pred,
+        "hr_score": 50, "ulx_checks": 5,
+        "parlay_role": (["Anchor"] * 40 + ["Value"] * 40 + ["Longshot"] * 40
+                        + [""] * 680),
+        "top_pick": 0, "hit_hr": hit,
+    })
+    added = tuning.append_eval_rows(log)
+    assert added == 800
+    assert tuning.append_eval_rows(log) == 0        # de-duped -> no growth
+
+    t = tuning.fit_calibration(tuning.load_eval_log())
+    t.update(tuning.fit_role_factors(tuning.load_eval_log()))
+    tuning.save_tuning(t, when="2026-07-02")
+    assert t["n"] == 800 and len(t["bins"]) > 0
+    # Calibration pulls an overconfident probability DOWN (monotone, damped).
+    assert tuning.calibrate_game_prob(0.25) < 0.25
+    assert tuning.calibrate_game_prob(0.25) >= 0.6 * 0.25   # clamped shift
+    # Role factors learned (all roles have >= 25 legs) and applied to legs.
+    assert set(t["role_factors"]) == {"Anchor", "Value", "Longshot"}
+    for f in t["role_factors"].values():
+        assert 0.6 <= f <= 1.4
+    assert tuning.role_prob_factor("Anchor") == t["role_factors"]["Anchor"]
+
+    # Below the minimum record -> identity (no adjustment).
+    tuning.save_tuning({"n": 50, "bins": []}, when="2026-07-02")
+    assert tuning.calibrate_game_prob(0.25) == 0.25
+    tuning.reload_tuning()
+
+
 def test_play_by_play_actual_pitcher(monkeypatch):
     """HRs are tagged with the ACTUAL pitcher per HR from the play-by-play feed."""
     from src import sources

@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from .lineup import spot_role_fit
+from .tuning import role_prob_factor
 from .odds import (
     american_to_decimal,
     american_to_prob,
@@ -232,7 +233,14 @@ def _summarize(legs: pd.DataFrame, n_legs: int) -> tuple[dict, list]:
     combined_dec = float(dec.prod())
     combined_american = decimal_to_american(combined_dec)
     implied = 1.0 / combined_dec
-    model_prob = float(legs["hr_prob_game"].prod())   # independence assumption
+    # Ticket win%: independence assumption, with each leg's probability scaled
+    # by its role's REAL track-record reliability (learned daily; 1.0 until
+    # enough logged legs exist — see src/tuning.py).
+    leg_probs = [
+        float(np.clip(p * role_prob_factor(str(r)), 0.002, 0.6))
+        for p, r in zip(legs["hr_prob_game"], legs.get("role", [""] * len(legs)))
+    ]
+    model_prob = float(np.prod(leg_probs))
     ev_pct = model_prob * combined_dec - 1.0          # per $1 stake
 
     summary = {
