@@ -1,12 +1,45 @@
 {
- "n": 274,
- "bins": [],
- "brier": 0.08495,
- "updated": "2026-07-08",
+ "n": 544,
+ "bins": [
+  {
+   "pred": 0.0706,
+   "actual": 0.0147
+  },
+  {
+   "pred": 0.094,
+   "actual": 0.0294
+  },
+  {
+   "pred": 0.1078,
+   "actual": 0.0294
+  },
+  {
+   "pred": 0.1208,
+   "actual": 0.0882
+  },
+  {
+   "pred": 0.1341,
+   "actual": 0.1471
+  },
+  {
+   "pred": 0.1516,
+   "actual": 0.1471
+  },
+  {
+   "pred": 0.1722,
+   "actual": 0.1471
+  },
+  {
+   "pred": 0.215,
+   "actual": 0.2647
+  }
+ ],
+ "brier": 0.08849,
+ "updated": "2026-07-09",
  "role_factors": {},
  "role_n": {
-  "Anchor": 1,
-  "Longshot": 1,
-  "Value": 1
+  "Anchor": 2,
+  "Longshot": 2,
+  "Value": 2
  }
 }
