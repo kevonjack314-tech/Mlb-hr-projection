@@ -162,18 +162,32 @@ def _live_hr_history(start_iso: str, end_iso: str):
         if "hr_count" in events_df.columns and gcols:
             events_df = (events_df.groupby(gcols, dropna=False, as_index=False)["hr_count"]
                          .sum())
-        # Enrich with season batted-ball metrics by MLBAM id (cached pull).
-        try:
-            season = sc_mod.get_season_batter_table(end.year)
-            if season is not None and not season.empty and "mlbam_id" in season.columns:
-                sby = season.set_index("mlbam_id")
-                for mc in _PROFILE_METRIC_COLS:
-                    if mc in sby.columns:
-                        col = sby[mc]
-                        events_df[mc] = events_df["mlbam_id"].map(
-                            lambda i, _c=col: _c.get(i, np.nan))
-        except Exception:
-            pass
+        # Enrich each HR hitter through the SAME per-player lookups the live
+        # slate uses (matched by MLBAM id, then normalized name) — the code
+        # path proven to attach real metrics on Streamlit Cloud. This is what
+        # powers the pre-game metrics + "why they hit" insight.
+        prof_rows = []
+        for _, r in events_df.iterrows():
+            prof = {}
+            try:
+                season = sc_mod.lookup_season(end.year, r.get("player"),
+                                              r.get("mlbam_id"))
+                if season:
+                    prof.update({k: v for k, v in season.items()
+                                 if k in _PROFILE_METRIC_COLS or k in
+                                 ("pa", "season_hr", "power_tier", "k_pct")})
+                recent = sc_mod.lookup_recent_form(end_iso, r.get("mlbam_id"))
+                if recent:
+                    prof.update(recent)
+                peri = sc_mod.lookup_pitching(end.year, r.get("pitcher_name"))
+                if peri:
+                    prof.update(peri)   # pitcher_hr9 / GB% / FB% for the insight
+            except Exception:
+                pass
+            prof_rows.append(prof)
+        prof_df = pd.DataFrame(prof_rows, index=events_df.index)
+        for c in prof_df.columns:
+            events_df[c] = prof_df[c]
 
         if "bats" not in events_df.columns:
             events_df["bats"] = "R"
