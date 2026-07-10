@@ -46,6 +46,37 @@ keeps the lineup HR log fresh.
 
 ---
 
+## 🏈 NFL Matchup Lab (companion app)
+
+A second, independent Streamlit app in the same repo: **`nfl_app.py`** (package
+`nfl/`). Pure analytics, no betting framework — projects who's a **🎯 TD
+favorite** and who's on **💯 100-yard watch** each week from:
+
+- **previous-season per-game production** (yards, TDs, red-zone share) —
+  modeled baselines now (offseason), with an `nfl_data_py` hook to overlay real
+  numbers once the season starts,
+- **opponent defense strength**, and
+- the **defensive scheme each team runs** (press-man blitz, two-high zone,
+  single-high, soft zone, attacking front) × the player's own **archetype**
+  (alpha X receiver, deep threat, slot tech, YAC creator, power/zone back,
+  receiving back, seam/red-zone TE, dual-threat/pocket QB) — see
+  `nfl/schemes.py` for the full interaction matrix and the "why" behind e.g.
+  *"Ja'Marr Chase vs a press-man blitz team → alpha receivers feast."*
+- **player-vs-team history** (damped, needs ≥2 prior meetings).
+
+Run it locally:
+```bash
+streamlit run nfl_app.py
+```
+Deploy it as a **separate Streamlit Cloud app** pointed at this same repo with
+main file `nfl_app.py` — independent URL, independent redeploys, shares the
+odds-math helpers in `src/odds.py`. Tabs: ⭐ Favorites (the week's TD/100-yd
+calls), 📊 Player Boards (sortable, per-prop, exportable), 🥊 Matchup Explorer
+(both teams in a game side by side with scheme context), 🧠 Team Schemes (every
+team's defense/offense + the scheme cheat sheet), 📖 Method.
+
+---
+
 ## What the app shows
 
 ### Tabs / pages

@@ -439,17 +439,29 @@ def _prob_to_american(p: float) -> int:
     return int(round(100 * (1 - p) / p))
 
 
+def _num(v):
+    """Real number or None (guards NaN so rationales never print 'nan%')."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f
+
+
 def _build_rationale(row: pd.Series, out: dict) -> str:
     bits = []
-    if out["barrel_score"] >= 70:
-        bits.append(f"elite barrel rate ({row.get('barrel_pct')}%)")
-    elif out["barrel_score"] >= 50:
-        bits.append(f"solid barrel rate ({row.get('barrel_pct')}%)")
-    if out["max_ev_score"] >= 70:
-        bits.append(f"big raw power ({row.get('max_ev')} mph max EV)")
-    if row.get("fb_pct") is not None and out.get("fb_score", 0) >= 65:
-        bits.append(f"fly-ball hitter ({row.get('fb_pct')}% FB)")
-    if out["recent_form_score"] >= 65:
+    barrel = _num(row.get("barrel_pct"))
+    if barrel is not None and out["barrel_score"] >= 70:
+        bits.append(f"elite barrel rate ({barrel}%)")
+    elif barrel is not None and out["barrel_score"] >= 55:
+        bits.append(f"solid barrel rate ({barrel}%)")
+    max_ev = _num(row.get("max_ev"))
+    if max_ev is not None and out["max_ev_score"] >= 70:
+        bits.append(f"big raw power ({max_ev} mph max EV)")
+    fb = _num(row.get("fb_pct"))
+    if fb is not None and out.get("fb_score", 0) >= 65:
+        bits.append(f"fly-ball hitter ({fb}% FB)")
+    if _num(row.get("hr_rate_7")) is not None and out["recent_form_score"] >= 65:
         bits.append("hot recent form")
     if out["park_factor"] >= 106:
         bits.append(f"HR-friendly park ({int(out['park_factor'])} factor)")
@@ -461,10 +473,12 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
         bits.append("wind blowing in")
     if out["platoon_adv"]:
         bits.append(f"platoon edge vs {row.get('pitcher_throws')}HP")
-    if row.get("pitcher_hr9", 1.2) >= 1.4:
-        bits.append(f"facing HR-prone arm ({row.get('pitcher_hr9')} HR/9)")
+    hr9 = _num(row.get("pitcher_hr9"))
+    if hr9 is not None and hr9 >= 1.4:
+        bits.append(f"facing HR-prone arm ({hr9} HR/9)")
     if not bits:
-        bits.append("balanced profile")
+        bits.append("balanced profile" if barrel is not None
+                    else "metrics unavailable for this bat")
     return "; ".join(bits[:5]).capitalize()
 
 
