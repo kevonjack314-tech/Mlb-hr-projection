@@ -26,6 +26,7 @@ import pandas as pd
 import requests
 
 from .statcast import normalize_name
+from .trends import TIER_ODDS_BAND, tier_of
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 DEFAULT_HOLD = 0.10  # typical HR-prop hold used for model-implied book odds
@@ -61,6 +62,20 @@ def model_market_odds(prob: float, hold: float = DEFAULT_HOLD) -> int:
     """Shade a true probability into a realistic book price (worse than fair)."""
     market_prob = float(np.clip(prob * (1.0 + hold), 0.01, 0.97))
     return prob_to_american(market_prob)
+
+
+def tier_banded_market_odds(prob: float, season_hr=None, hold: float = DEFAULT_HOLD) -> int:
+    """Model-implied book price, clamped into the player's tier band.
+
+    Books don't price HR props off a pure model — stars sit ~+200 to +450,
+    mid-tier bats (8–17 HR) ~+500 to +700, and under-the-radar bats +700 up.
+    The model's shaded price is the starting point; the tier band is the
+    reality check so an offline price never looks like something no book
+    would ever hang.
+    """
+    price = model_market_odds(prob, hold)
+    lo, hi = TIER_ODDS_BAND[tier_of(season_hr)]
+    return int(min(max(price, lo), hi))
 
 
 def format_american(a) -> str:
@@ -204,7 +219,7 @@ def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.Da
             book.append(hit["odds"])
             source.append(f"LIVE · {hit['book']}")
         else:
-            book.append(model_market_odds(row["hr_prob_game"]))
+            book.append(tier_banded_market_odds(row["hr_prob_game"], row.get("season_hr")))
             source.append("model")
     df["book_odds"] = book
     df["odds_source"] = source

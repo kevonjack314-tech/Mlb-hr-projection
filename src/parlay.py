@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from .lineup import spot_role_fit
+from .trends import TIER_MID, TIER_STAR, tier_of
 from .tuning import role_prob_factor
 from .odds import (
     american_to_decimal,
@@ -57,14 +58,26 @@ COMPOSITIONS = {
 ROLE_EMOJI = {"Anchor": "⚓", "Value": "💰", "Longshot": "🚀"}
 
 
-def assign_role(prob: float) -> str | None:
+def assign_role(prob: float, season_hr=None) -> str | None:
+    """Parlay role for a bat. Tier-first when the season HR total is known:
+    ⭐ stars (18+ HR) are the Anchors, 🔷 mid bats (8-17) the Value plays, and
+    🎯 under-the-radar bats (≤7) the Longshots — matching how books actually
+    price them. Bats below the longshot probability floor stay off tickets.
+    Falls back to pure probability bands when season HRs are missing."""
+    if prob < LONGSHOT_MIN_PROB:
+        return None
+    if season_hr is not None and season_hr == season_hr:  # known, non-NaN
+        tier = tier_of(season_hr)
+        if tier == TIER_STAR:
+            return "Anchor" if prob >= VALUE_MIN_PROB else "Value"
+        if tier == TIER_MID:
+            return "Value" if prob >= LONGSHOT_MIN_PROB * 1.5 else "Longshot"
+        return "Longshot"
     if prob >= ANCHOR_MIN_PROB:
         return "Anchor"
     if prob >= VALUE_MIN_PROB:
         return "Value"
-    if prob >= LONGSHOT_MIN_PROB:
-        return "Longshot"
-    return None
+    return "Longshot"
 
 
 def archetype(row: pd.Series) -> str:
@@ -118,7 +131,8 @@ def role_fit(row: pd.Series, role: str) -> float:
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["role"] = df["hr_prob_game"].map(assign_role)
+    df["role"] = df.apply(
+        lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1)
     df["archetype"] = df.apply(archetype, axis=1)
     return df
 
@@ -220,7 +234,8 @@ def summarize_selection(df: pd.DataFrame, players: list[str]) -> dict:
     legs = df[df["player"].isin(players)].copy()
     if legs.empty:
         return {"legs": legs, "summary": {"n_legs": 0}, "checklist": []}
-    legs["role"] = legs["hr_prob_game"].map(assign_role).fillna("Leg")
+    legs["role"] = legs.apply(
+        lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1).fillna("Leg")
     summary, checklist = _summarize(legs, len(legs))
     return {"legs": legs, "summary": summary, "checklist": checklist}
 
