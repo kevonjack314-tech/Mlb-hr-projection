@@ -27,6 +27,10 @@ def main() -> None:
     start = end - dt.timedelta(days=lookback)
     _events, slate_hist, source, _notes = build_hr_history(
         start.isoformat(), end.isoformat(), prefer_live=True)
+    if not str(source).startswith("LIVE"):
+        print(f"[{source}] {start}..{end}: live data unavailable — log left "
+              "untouched (never write simulated rows to the real log).")
+        return
     added = update_log_from_history(slate_hist)
     print(f"[{source}] {start}..{end}: logged {added} new hitter-days to the "
           f"lineup HR log.")
