@@ -49,6 +49,11 @@ keeps the lineup HR log fresh.
 ## What the app shows
 
 ### Tabs / pages
+0. **🏆 Top 3** (🎯 Picks → Top 3) — the daily shortlist: **Top 3 HR picks**
+   (highest HR Score), **Top 3 Value plays** (🔷 mid-tier bats ranked by sneaky
+   score + book edge), and **Top 3 Longshots** (🎯 under-the-radar ceiling), as
+   cards with odds, tier, Barrel% / Hard-Hit% / FB% / HR-FB / Max EV and the
+   model's rationale. No player appears twice across the three lists.
 1. **🚀 Best Longshots** — high-upside, boom-or-bust bats ranked by an
    *explosiveness* score (max EV + barrel% + favorable park/weather). Good for
    +EV HR props and DFS tournaments. Includes vig-free fair odds.
