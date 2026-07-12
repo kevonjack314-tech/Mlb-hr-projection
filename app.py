@@ -43,6 +43,10 @@ from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
 from src.pitchers import attach_sp_spot_signal, sp_spot_counts_for
 from src.props import BET_LABEL, BET_TYPES, attach_props, build_ladder_parlay
 from src.sources import get_slate
+from src.trends import (
+    MID_HR_MIN, STAR_HR_MIN, TIER_UNDER,
+    compute_trends, rotation_hint, tier_of,
+)
 
 st.set_page_config(
     page_title="HR Hunter",
@@ -123,6 +127,8 @@ def load_scored_slate(date_iso: str, prefer_live: bool):
     game_date = dt.date.fromisoformat(date_iso)
     df, source, notes = get_slate(game_date, prefer_live=prefer_live)
     scored = score_slate(df)
+    scored["player_tier"] = (scored["season_hr"].map(tier_of)
+                             if "season_hr" in scored.columns else TIER_UNDER)
     return scored, source, notes
 
 
@@ -161,7 +167,8 @@ GLOSSARY = {
     "Fair Odds": "Vig-free American odds implied by the model's game HR probability.",
     "Calib HR%": "Self-calibrated HR probability — the ACTUAL HR rate that bats with this pre-game HR Score produced over the trailing window. The system relearns this each run.",
     "Calib Edge": "Calibrated HR% minus model HR%. Positive = history says this rating homers more than the model credits; the parlay builder leans into it.",
-    "Book Odds": "American odds to hit ≥1 HR you'd actually bet — LIVE from a sportsbook when an ODDS_API_KEY is configured, else a model-implied market price (fair price + typical hold).",
+    "Book Odds": "American odds to hit ≥1 HR you'd actually bet — LIVE from a sportsbook when an ODDS_API_KEY is configured, else a model-implied market price (fair price + typical hold) clamped into the player's tier band: ⭐ Stars +200..+450, 🔷 Mid +500..+700, 🎯 Under +700 and up — so offline prices look like real board prices.",
+    "Tier": f"Player tier by season HR total — ⭐ Star ≥{STAR_HR_MIN} HR (books ~+200 to +450, the Anchors), 🔷 Mid {MID_HR_MIN}-{STAR_HR_MIN-1} HR (~+500 to +700, the Value bats), 🎯 Under ≤{MID_HR_MIN-1} HR (+700 and up, the Longshots). Drives parlay roles and model-implied odds.",
     "Edge%": "Model HR% minus the book's implied HR%. Positive = +EV (model thinks the bat is underpriced). With model-implied odds it sits near −hold (the vig).",
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
@@ -331,6 +338,7 @@ DISPLAY_COLUMNS = {
     "bats": "Bats",
     "position": "Pos",
     "lineup_spot": "Spot",
+    "player_tier": "Tier",
     "ulx_grade": "ULX",
     "ulx_checks": "ULX ✓",
     "hr_score": "HR Score",
@@ -389,7 +397,7 @@ DISPLAY_COLUMNS = {
 # Raw column keys kept in "Simple view" — the at-a-glance essentials. Detailed
 # view shows everything. The active headline/sort column is always added back.
 ESSENTIAL_KEYS = {
-    "player", "team", "opponent", "pitcher_name", "lineup_spot",
+    "player", "team", "opponent", "pitcher_name", "lineup_spot", "player_tier",
     "ulx_grade", "ulx_checks",
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
@@ -413,6 +421,7 @@ COLUMN_CONFIG = {
     ),
     "Calib HR%": st.column_config.NumberColumn("Calib HR%", help=GLOSSARY["Calib HR%"], format="%.0f%%"),
     "Calib Edge": st.column_config.NumberColumn("Calib Edge", help=GLOSSARY["Calib Edge"], format="%+.1f"),
+    "Tier": st.column_config.TextColumn("Tier", help=GLOSSARY["Tier"]),
     "ULX": st.column_config.TextColumn("ULX", help=GLOSSARY["ULX"]),
     "ULX ✓": st.column_config.NumberColumn("ULX ✓", help=GLOSSARY["ULX ✓"], format="%d/9"),
     "ISO": st.column_config.NumberColumn("ISO", help=GLOSSARY["ISO"], format="%.3f"),
@@ -682,17 +691,22 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
     # What the model would have rated them, pre-game.
     if "hr_prob_game" in sheet_sorted.columns:
         from src.parlay import assign_role
-        sheet_sorted["role"] = sheet_sorted["hr_prob_game"].map(assign_role)
+        sheet_sorted["role"] = sheet_sorted.apply(
+            lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1)
     if "hr_score" in sheet_sorted.columns:
         sheet_sorted["verdict"] = sheet_sorted["hr_score"].map(_model_verdict)
-    sheet_cols = [c for c in ["date", "player", "team", "lineup_spot", "pitcher_name",
+    if "season_hr" in sheet_sorted.columns:
+        sheet_sorted["player_tier"] = sheet_sorted["season_hr"].map(tier_of)
+    sheet_cols = [c for c in ["date", "player", "team", "lineup_spot", "player_tier",
+                              "pitcher_name",
                               "opponent", "hr_count", "hr_score", "hr_prob_game", "role",
                               "verdict", "barrel_pct", "max_ev", "hr_fb", "xiso",
                               "park_factor", "recent_form_score", "rationale"]
                   if c in sheet_sorted.columns]
     show = sheet_sorted[sheet_cols].rename(columns={
         "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
-        "lineup_spot": "Spot", "hr_count": "HR", "hr_score": "Model Score",
+        "lineup_spot": "Spot", "player_tier": "Tier", "hr_count": "HR",
+        "hr_score": "Model Score",
         "hr_prob_game": "Model HR%", "role": "Role", "verdict": "Model take",
         "pitcher_name": "Starting Pitcher", "park_factor": "Park",
         "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
@@ -822,6 +836,35 @@ def tab_previous_hrs(history):
                     )
 
     render_hr_stat_sheet(events, start_iso, end_iso)
+
+
+def tab_trends_lab(history):
+    """12 pattern detectors over the HR-history window (src/trends.py)."""
+    (events, _summary, _centroid, _calib, _trend, _league_spot, _curve, _report,
+     source, _notes, start_iso, end_iso, _half_life) = history
+    st.subheader("🔍 Trends Lab — 12 HR patterns")
+    badge = "🟢" if source.startswith("LIVE") else "🟡"
+    st.caption(
+        f"{badge} **{source}** · window **{start_iso} → {end_iso}** · Tiers by season "
+        f"HR total: ⭐ Star ≥{STAR_HR_MIN} · 🔷 Mid {MID_HR_MIN}-{STAR_HR_MIN-1} · "
+        f"🎯 Under ≤{MID_HR_MIN-1}. Books price ⭐ ~+200..+450, 🔷 ~+500..+700, "
+        "🎯 +700+ — the same bands the model uses when live odds are off."
+    )
+    hint = rotation_hint(events)
+    if hint:
+        st.info(f"🔄 **Today's rotation read:** {hint}")
+
+    trends = compute_trends(events)
+    if not trends:
+        st.warning("No HR history available to mine for trends yet.")
+        return
+    st.markdown(f"**{len(trends)} trends** computed from this window — each with a "
+                "one-line signal. Open any card for the numbers behind it.")
+    for t in trends:
+        with st.expander(t["title"], expanded=False):
+            st.markdown(t["signal"])
+            if t.get("table") is not None and len(t["table"]):
+                st.dataframe(t["table"], hide_index=True, use_container_width=True)
 
 
 def tab_trends(history, projection_slate):
@@ -1163,8 +1206,11 @@ def _prop_boards(df):
                        key=f"dl_prop_{bet}")
 
 
-def tab_parlay(df, end_iso, live_odds):
+def tab_parlay(df, end_iso, live_odds, rot_hint=None):
     st.subheader("🎰 Parlays")
+    if rot_hint:
+        st.info(f"🔄 {rot_hint}  \n_(from the Trends Lab tier-rotation pattern — "
+                "see 📚 History → 🔍 Trends Lab)_")
     fetch_lines = st.toggle(
         "📡 Fetch real TB/Hits lines", value=False, key="fetch_prop_lines",
         help="Pull live Total Bases (Over 1.5) and Hits (Over 0.5) prop lines from "
@@ -1265,7 +1311,8 @@ def tab_value_finder(df):
 
     from src.parlay import assign_role
     v = df.copy()
-    v["role"] = v["hr_prob_game"].map(assign_role)
+    v["role"] = v.apply(
+        lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1)
     v = v[v["hr_prob_game"] >= min_prob]
     if role_filter:
         v = v[v["role"].isin(role_filter)]
@@ -1587,16 +1634,18 @@ def main():
         else:
             tab_all(filtered)
     with t_parlay:
-        tab_parlay(filtered, end_iso, live_odds)
+        tab_parlay(filtered, end_iso, live_odds, rot_hint=rotation_hint(events))
     with t_lineups:
         tab_lineups(filtered, end_iso, prefer_live)
     with t_history:
         hview = st.radio(
-            "View", ["📋 Previous HRs", "📈 Trends & Backtest"],
+            "View", ["📋 Previous HRs", "🔍 Trends Lab", "📈 Trends & Backtest"],
             horizontal=True, label_visibility="collapsed", key="hist_view",
         )
         if hview == "📋 Previous HRs":
             tab_previous_hrs(history)
+        elif hview == "🔍 Trends Lab":
+            tab_trends_lab(history)
         else:
             tab_trends(history, filtered)
 

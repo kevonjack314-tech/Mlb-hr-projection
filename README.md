@@ -85,6 +85,41 @@ keeps the lineup HR log fresh.
    **Edge%** = +EV), filterable by role / probability / live-only, with a one-click
    value parlay.
 
+### 🔍 Trends Lab — 12 HR patterns & player tiers
+
+**📚 History → 🔍 Trends Lab** mines the rolling HR-history window with 12
+pattern detectors (`src/trends.py`), each returning a one-line **signal** plus
+the table behind it:
+
+1. **📅 Lineup spot × day of week** — which spots homer on which specific days.
+2. **📅 Tier × day of week** — which tier does the damage on each weekday.
+3. **🔄 Tier rotation** — after a *star-heavy* HR day, do **mid/under** bats take
+   over the next day? (The Parlays tab shows a live "rotation read" for today.)
+4. **🔁 Back-to-back HRs** — how often hitters homer again the *very next day*,
+   and who's riding a streak into today.
+5. **🔥 Active HR streaks** — bats with 2+ consecutive HR days.
+6. **💥 Multi-HR follow-up** — do 2+ HR games lead to another HR within 2 days?
+7. **📈 Tier momentum** — last-7-day tier mix vs the full window.
+8. **🗓️ Weekend vs weekday** HR volume.
+9. **🏟️ Team stacks** — 2+/3+ HR lineup days and next-day carry-over.
+10. **👥 Lineup-spot pairs** — which spots go deep *together* on stack days.
+11. **⏳ Drought-breakers** — median gap between a hitter's HRs; share breaking
+    a 7+ day drought.
+12. **🏠 Home vs away** tilt, by tier.
+
+**Player tiers** (by season HR total) drive roles and offline odds everywhere:
+
+| Tier | Season HR | Typical book price | Parlay role |
+|---|---|---|---|
+| ⭐ Star | 18+ | **+200 to +450** (never longshots) | ⚓ Anchor |
+| 🔷 Mid | 8–17 | **+500 to +700** (the value band) | 💰 Value |
+| 🎯 Under | ≤7 | **+700 and up** (longshots) | 🚀 Longshot |
+
+When live odds are off/unavailable, the model-implied **Book Odds** are clamped
+into the player's tier band (`tier_banded_market_odds`), so offline prices look
+like prices a book would actually hang. A **Tier** column appears on every
+board and on the Previous-HRs stat sheet.
+
 ### Lineup spot (with a recurring HR-by-spot log)
 
 Every hitter carries a **lineup spot (1–9)** — live from the posted batting order
@@ -424,8 +459,9 @@ modeled slates so the whole analysis runs without network.
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
-│   ├── odds.py             # live HR odds (The Odds API) + model-implied fallback
-│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator
+│   ├── odds.py             # live HR odds (The Odds API) + tier-banded model fallback
+│   ├── trends.py           # Trends Lab: player tiers + 12 HR pattern detectors
+│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator (tier-aware)
 │   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
 │   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 10 games)
 │   ├── learn.py            # self-calibration: HR rate by model rating
