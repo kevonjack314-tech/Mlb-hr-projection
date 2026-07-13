@@ -2,44 +2,44 @@
  "n": 7651,
  "bins": [
   {
-   "pred": 0.0606,
+   "pred": 0.0579,
    "actual": 0.0125
   },
   {
-   "pred": 0.0822,
-   "actual": 0.0345
+   "pred": 0.0811,
+   "actual": 0.0314
   },
   {
-   "pred": 0.0979,
-   "actual": 0.0565
+   "pred": 0.0963,
+   "actual": 0.0544
   },
   {
-   "pred": 0.119,
-   "actual": 0.0993
+   "pred": 0.1175,
+   "actual": 0.1014
   },
   {
-   "pred": 0.1412,
-   "actual": 0.1339
+   "pred": 0.1404,
+   "actual": 0.1308
   },
   {
-   "pred": 0.1529,
-   "actual": 0.1621
+   "pred": 0.1528,
+   "actual": 0.1642
   },
   {
-   "pred": 0.1729,
-   "actual": 0.1987
+   "pred": 0.1734,
+   "actual": 0.205
   },
   {
-   "pred": 0.2336,
-   "actual": 0.2633
+   "pred": 0.2346,
+   "actual": 0.2612
   }
  ],
- "brier": 0.10004,
+ "brier": 0.09988,
  "updated": "2026-07-13",
  "role_factors": {
-  "Anchor": 1.021,
+  "Anchor": 1.02,
   "Longshot": 0.957,
-  "Value": 1.081
+  "Value": 1.08
  },
  "role_n": {
   "Anchor": 31,
@@ -235,8 +235,8 @@
   ],
   "intercept": -2.6347,
   "val_days": 6,
-  "val_brier_model": 0.09239,
-  "val_brier_baseline": 0.10482,
+  "val_brier_model": 0.09245,
+  "val_brier_baseline": 0.10388,
   "active": true,
   "note": "ACTIVE \u2014 beats the hand-weighted model on held-out days"
  }
