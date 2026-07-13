@@ -54,6 +54,8 @@ FEATURE_COLS = [
     # matchup & environment
     "platoon_adv", "pitch_matchup_score", "matchup_score", "env_score",
     "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
+    # real platoon splits + bullpen exposure (may be sparse early on)
+    "woba_vs_l", "woba_vs_r", "woba_vs_hand", "bullpen_hr9",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",

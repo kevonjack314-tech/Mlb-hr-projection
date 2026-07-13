@@ -32,6 +32,33 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 DEFAULT_HOLD = 0.10  # typical HR-prop hold used for model-implied book odds
 TIMEOUT = 12
 
+# When a REAL book price exists, shrink the model's HR probability partway
+# toward the (de-vigged) market — books price in weather, scratches, and news
+# the model can't see, so the blend is sharper than either side alone.
+MARKET_BLEND_W = 0.35
+LEAGUE_GAME_TOTAL = 8.6   # typical MLB over/under; totals nudge the run env
+
+# Odds API events use full team names; the slate uses MLB abbreviations.
+TEAM_FULL_TO_ABBR = {
+    "Arizona Diamondbacks": "AZ", "Atlanta Braves": "ATL",
+    "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
+    "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
+    "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
+    "Colorado Rockies": "COL", "Detroit Tigers": "DET",
+    "Houston Astros": "HOU", "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
+    "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
+    "Minnesota Twins": "MIN", "New York Mets": "NYM",
+    "New York Yankees": "NYY", "Oakland Athletics": "OAK",
+    "Athletics": "OAK", "Philadelphia Phillies": "PHI",
+    "Pittsburgh Pirates": "PIT", "San Diego Padres": "SD",
+    "San Francisco Giants": "SF", "Seattle Mariners": "SEA",
+    "St. Louis Cardinals": "STL", "Tampa Bay Rays": "TB",
+    "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR",
+    "Washington Nationals": "WSH",
+}
+_ABBR_ALIASES = {"AZ": "ARI", "OAK": "ATH"}   # cover either abbreviation style
+
 
 # --------------------------------------------------------------------------- #
 # Odds math
@@ -175,6 +202,52 @@ def fetch_live_hr_odds(date_iso: str) -> dict:
     return fetch_live_prop_odds(date_iso, PROP_MARKETS["HR"][0]).get("HR", {})
 
 
+@lru_cache(maxsize=16)
+def fetch_game_totals(date_iso: str) -> dict:
+    """{home_team_abbr: over/under total} for the date's games (one cheap call).
+
+    The market's game total prices in the run environment — park, weather,
+    both pitchers, news — so it's a strong aggregate signal even for hitters
+    without a posted HR prop. Empty dict on any failure / no key.
+    """
+    out: dict = {}
+    key = os.environ.get("ODDS_API_KEY")
+    if not key:
+        return out
+    try:
+        r = requests.get(
+            f"{ODDS_API_BASE}/sports/baseball_mlb/odds",
+            params={"apiKey": key, "regions": "us", "markets": "totals",
+                    "oddsFormat": "american", "dateFormat": "iso"},
+            timeout=TIMEOUT,
+        )
+        r.raise_for_status()
+        events = r.json()
+    except Exception:
+        return out
+    for e in events:
+        if not str(e.get("commence_time", "")).startswith(date_iso):
+            continue
+        points = []
+        for bm in e.get("bookmakers", []):
+            for mk in bm.get("markets", []):
+                if mk.get("key") != "totals":
+                    continue
+                for o in mk.get("outcomes", []):
+                    if o.get("point") is not None:
+                        points.append(float(o["point"]))
+        if not points:
+            continue
+        total = float(np.median(points))
+        abbr = TEAM_FULL_TO_ABBR.get(str(e.get("home_team", "")))
+        if abbr:
+            out[abbr] = total
+            alias = _ABBR_ALIASES.get(abbr)
+            if alias:
+                out.setdefault(alias, total)
+    return out
+
+
 def attach_prop_lines(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.DataFrame:
     """Overlay real TB / Hits prop lines onto the slate's estimated odds.
 
@@ -207,9 +280,30 @@ def attach_prop_lines(df: pd.DataFrame, date_iso: str, use_live: bool = True) ->
 
 
 def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.DataFrame:
-    """Add book_odds / odds_source / implied_prob / edge_pct to a scored slate."""
+    """Add book_odds / odds_source / implied_prob / edge_pct to a scored slate.
+
+    Two market signals sharpen the model probability along the way:
+      1. **Game totals** — the over/under prices in the whole run environment;
+         a 10.5 game lifts every HR prob a little, a 7 game trims it.
+      2. **Market blend** — where a REAL book price exists, the probability is
+         shrunk MARKET_BLEND_W of the way toward the de-vigged market price
+         (books see scratches/news the model can't). The pre-blend model
+         probability is kept in `hr_prob_model` for transparency, and the
+         value signal (edge) is computed from the blended estimate.
+    """
     df = df.copy()
+    df["hr_prob_model"] = df["hr_prob_game"]
     live = fetch_live_hr_odds(date_iso) if use_live else {}
+    totals = fetch_game_totals(date_iso) if use_live else {}
+
+    # 1. Run-environment nudge from the market's game total.
+    if totals and "home_team" in df.columns:
+        df["game_total"] = df["home_team"].map(totals)
+        tot_mult = 1.0 + (df["game_total"] - LEAGUE_GAME_TOTAL) * 0.022
+        tot_mult = tot_mult.clip(0.93, 1.08).fillna(1.0)
+        df["hr_prob_game"] = (df["hr_prob_game"] * tot_mult).clip(0.002, 0.35).round(4)
+    else:
+        df["game_total"] = np.nan
 
     book, source = [], []
     for _, row in df.iterrows():
@@ -224,6 +318,17 @@ def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.Da
     df["book_odds"] = book
     df["odds_source"] = source
     df["implied_prob"] = df["book_odds"].map(american_to_prob)
-    df["edge_pct"] = ((df["hr_prob_game"] - df["implied_prob"]) * 100.0).round(1)
     df["odds_is_live"] = df["odds_source"].str.startswith("LIVE")
+
+    # 2. Blend toward the de-vigged market price where the price is real.
+    if bool(df["odds_is_live"].any()):
+        market_fair = df["implied_prob"] / (1.0 + DEFAULT_HOLD)
+        blended = ((1.0 - MARKET_BLEND_W) * df["hr_prob_game"]
+                   + MARKET_BLEND_W * market_fair)
+        df["hr_prob_game"] = np.where(
+            df["odds_is_live"], blended.clip(0.002, 0.35).round(4), df["hr_prob_game"])
+
+    if "fair_odds" in df.columns:   # keep fair odds consistent with the final prob
+        df["fair_odds"] = df["hr_prob_game"].map(prob_to_american)
+    df["edge_pct"] = ((df["hr_prob_game"] - df["implied_prob"]) * 100.0).round(1)
     return df

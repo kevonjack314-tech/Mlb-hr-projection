@@ -121,26 +121,49 @@ def has_platoon_advantage(bats: str, pitcher_throws: str) -> bool:
     return bats != throws
 
 
+def _platoon_multiplier(row: pd.Series) -> float:
+    """Platoon effect from the hitter's REAL wOBA vs today's pitcher hand
+    (Statcast, trailing 45 days, sample-gated). Falls back to the flat
+    ±5-6% handedness prior when the split isn't available."""
+    hand = str(row.get("pitcher_throws", "R")).upper()
+    split = row.get("woba_vs_l") if hand == "L" else row.get("woba_vs_r")
+    if split is not None and split == split:      # real split, non-NaN
+        # ~league wOBA .320; ±0.010 multiplier per 10 points of wOBA vs hand.
+        return float(np.clip(1.0 + (float(split) - 0.320) * 1.0, 0.88, 1.14))
+    platoon = has_platoon_advantage(row.get("bats", "R"), row.get("pitcher_throws", "R"))
+    return 1.06 if platoon else 0.95
+
+
 def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
     """Return (matchup_multiplier, matchup_score 0-100) from the pitcher matchup.
 
-    Drivers: pitcher HR/9 allowed, barrel% allowed, fly-ball lean, and the
-    hitter's platoon edge. A homer-prone flyball pitcher with a platoon
-    disadvantage is the juiciest matchup.
+    Drivers: the starter's HR/9 / barrels allowed / fly-ball lean, the
+    OPPONENT BULLPEN's HR/9 for the ~35% of PAs the starter won't face, and
+    the hitter's real platoon split vs today's hand. A homer-prone flyball
+    pitcher backed by a leaky pen, faced with a platoon edge, is the juiciest
+    matchup on the board.
     """
     hr9 = row.get("pitcher_hr9", 1.2)
     barrel_allowed = row.get("pitcher_barrel_pct_allowed", 8.0)
     lean = str(row.get("pitcher_lean", "NEU")).upper()
-    platoon = has_platoon_advantage(row.get("bats", "R"), row.get("pitcher_throws", "R"))
 
     # HR/9 maps ~ [0.6, 1.7] -> multiplier [0.86, 1.18].
     hr9_mult = np.clip(0.86 + (hr9 - 0.6) * (0.32 / 1.1), 0.80, 1.22)
     # Barrels allowed: league ~8%. +/-1.5% per point, gentle.
     barrel_mult = np.clip(1.0 + (barrel_allowed - 8.0) * 0.012, 0.90, 1.12)
     lean_mult = {"GB": 0.93, "NEU": 1.0, "FB": 1.08}.get(lean, 1.0)
-    platoon_mult = 1.06 if platoon else 0.95
+    sp_mult = float(hr9_mult * barrel_mult * lean_mult)
 
-    mult = float(hr9_mult * barrel_mult * lean_mult * platoon_mult)
+    # Bullpen exposure: ~35% of expected PAs come after the starter departs.
+    # Gentler slope than the starter (relief HR/9 is noisier).
+    pen_hr9 = row.get("bullpen_hr9")
+    if pen_hr9 is not None and pen_hr9 == pen_hr9:
+        pen_mult = float(np.clip(0.92 + (float(pen_hr9) - 0.9) * 0.20, 0.86, 1.14))
+        blended = 0.65 * sp_mult + 0.35 * pen_mult
+    else:
+        blended = sp_mult
+
+    mult = float(blended * _platoon_multiplier(row))
 
     # A 0-100 sub-score: center the multiplier (~0.75–1.45 plausible) onto 0-100.
     score = scale(mult, 0.80, 1.30)
@@ -246,6 +269,10 @@ def score_row(row: pd.Series) -> dict:
     platoon = has_platoon_advantage(row.get("bats", "R"), row.get("pitcher_throws", "R"))
     out["effective_bats"] = eff_side
     out["platoon_adv"] = platoon
+    _hand = str(row.get("pitcher_throws", "R")).upper()
+    _split = row.get("woba_vs_l") if _hand == "L" else row.get("woba_vs_r")
+    out["woba_vs_hand"] = round(float(_split), 3) if (
+        _split is not None and _split == _split) else None
 
     # --- Sub-scores ---
     pq = _power_quality_score(row)
