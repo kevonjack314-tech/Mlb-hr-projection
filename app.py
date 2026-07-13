@@ -36,7 +36,6 @@ from src.lineup import (
     attach_spot_signal,
     league_spot_table,
     player_spot_hr,
-    update_log_from_history,
 )
 from src.odds import attach_odds, attach_prop_lines, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
@@ -146,11 +145,10 @@ def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_d
     centroid = hr_profile_centroid(events, end_date_iso=end_iso, half_life_days=half_life_days)
     calib = calibration_table(slate_hist)
     trend = recent_trend(events, end_iso, recent_days=7)
-    # Lineup-spot HR data: grow the recurring log, then aggregate by spot.
-    # Only write when the history is REAL — never pollute the committed log
-    # with simulated rows (offline/demo runs read it but don't touch it).
-    if str(source).startswith("LIVE"):
-        update_log_from_history(slate_hist)
+    # Lineup-spot HR data: aggregate the recurring log (REAL graded hitter-days,
+    # grown daily by the GitHub Actions workflow from the eval record). The app
+    # never writes the log — slate_hist is always simulated (see history.py),
+    # so writing here would fill the log with fake rows.
     player_spot = player_spot_hr(slate_hist)
     league_spot = league_spot_table(slate_hist)
     # Self-calibration: empirical HR rate by model rating + a model report card.

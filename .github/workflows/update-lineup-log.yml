@@ -1,10 +1,10 @@
 name: Update lineup HR log
 
-# Recurring schedule: appends the prior day's HRs (by lineup spot) to
-# data/lineup_hr_log.csv and commits it, so the log accumulates over time.
-# GitHub-hosted runners have open network, so this logs REAL games (pybaseball
-# reaches Baseball Savant / FanGraphs / MLB StatsAPI); it falls back to the
-# deterministic simulation only if a source is unavailable.
+# Recurring schedule: grades yesterday against real box scores (eval log +
+# model retuning), then copies those REAL graded hitter-days into
+# data/lineup_hr_log.csv and commits both, so the record accumulates over
+# time. The lineup log is sourced from the eval record only — it can never
+# contain simulated rows.
 
 on:
   schedule:
@@ -17,7 +17,7 @@ on:
       lookback:
         description: "Days to look back"
         required: false
-        default: "2"
+        default: "3"
 
 permissions:
   contents: write
@@ -40,15 +40,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Update the lineup HR log
-        run: |
-          DATE="${{ github.event.inputs.date || '' }}"
-          LOOKBACK="${{ github.event.inputs.lookback || '2' }}"
-          if [ -z "$DATE" ]; then DATE="$(date -u +%F)"; fi
-          python scripts/update_lineup_log.py "$DATE" "$LOOKBACK"
-
       - name: Daily self-improvement (grade yesterday + retune)
         run: python scripts/daily_improve.py || echo "daily improve skipped"
+
+      - name: Update the lineup HR log (from the real graded record)
+        run: |
+          DATE="${{ github.event.inputs.date || '' }}"
+          LOOKBACK="${{ github.event.inputs.lookback || '3' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u +%F)"; fi
+          python scripts/update_lineup_log.py "$DATE" "$LOOKBACK"
 
       - name: Commit & push if anything changed
         run: |
