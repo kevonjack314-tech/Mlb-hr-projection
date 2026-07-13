@@ -1,0 +1,64 @@
+name: Backfill eval record
+
+# One-shot (manually triggered) backfill: grades past dates against real
+# lineups + box scores, growing data/eval_log.csv by weeks of real hitter-days
+# in a single run, then retunes calibration / role factors / the learned
+# feature model and refreshes the lineup HR log from the graded record.
+
+on:
+  workflow_dispatch:
+    inputs:
+      end_date:
+        description: "End date (YYYY-MM-DD), defaults to yesterday (UTC)"
+        required: false
+      days:
+        description: "How many days back to grade"
+        required: false
+        default: "30"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lineup-log        # don't race the daily update job
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Backfill the eval record
+        run: |
+          DATE="${{ github.event.inputs.end_date || '' }}"
+          DAYS="${{ github.event.inputs.days || '30' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
+          python scripts/backfill_eval.py "$DATE" "$DAYS"
+
+      - name: Refresh the lineup HR log from the graded record
+        run: |
+          DAYS="${{ github.event.inputs.days || '30' }}"
+          python scripts/update_lineup_log.py "$(date -u +%F)" "$((DAYS + 2))"
+
+      - name: Commit & push if anything changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git add data/eval_log.csv data/model_tuning.json data/lineup_hr_log.csv 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: backfill eval record + retune [skip ci]"
+            git push
+          fi

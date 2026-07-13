@@ -509,4 +509,12 @@ def score_slate(df: pd.DataFrame) -> pd.DataFrame:
         return df
     scored = df.apply(score_row, axis=1, result_type="expand")
     result = pd.concat([df.reset_index(drop=True), scored.reset_index(drop=True)], axis=1)
+    # Learned-weights blend: once the feature model trained on the real record
+    # beats the hand weights on held-out days, its probability is blended in
+    # (damped, capped at 50% — see src/tuning.py). No-op until then.
+    from .tuning import apply_feature_model
+    adjusted = apply_feature_model(result)
+    if adjusted is not result and "hr_prob_game" in adjusted.columns:
+        adjusted["fair_odds"] = adjusted["hr_prob_game"].map(_prob_to_american)
+        result = adjusted
     return result

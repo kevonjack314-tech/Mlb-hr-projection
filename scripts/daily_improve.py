@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.tuning import (  # noqa: E402
     append_eval_rows, brier_score, evaluate_day, fit_calibration,
-    fit_role_factors, load_eval_log, save_tuning,
+    fit_feature_model, fit_role_factors, load_eval_log, save_tuning,
 )
 
 
@@ -41,6 +41,7 @@ def main() -> None:
     log = load_eval_log()
     tuning = fit_calibration(log)
     tuning.update(fit_role_factors(log))
+    tuning.update(fit_feature_model(log))
     save_tuning(tuning, when=dt.date.today().isoformat())
 
     n = tuning.get("n", 0)
@@ -54,6 +55,11 @@ def main() -> None:
         print(f"parlay role factors: {tuning['role_factors']} (n={tuning.get('role_n')})")
     else:
         print(f"parlay role factors: warming up (legs so far: {tuning.get('role_n', {})})")
+    fm = tuning.get("feature_model") or {}
+    print(f"learned feature model: {fm.get('note', 'n/a')}"
+          + (f" | holdout Brier {fm.get('val_brier_model')} vs "
+             f"hand-weighted {fm.get('val_brier_baseline')}"
+             if fm.get("val_brier_model") is not None else ""))
 
 
 if __name__ == "__main__":
