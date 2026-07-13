@@ -228,6 +228,19 @@ selections a little sharper — automatically.
   the top candidates per role, so you can mix up the legs and get a fresh valid
   ticket each click (the leg count & strategy still apply).
 
+### Sharper matchups: real platoon splits + bullpen exposure
+
+- **Real platoon splits** — each hitter carries his actual **wOBA vs LHP / vs
+  RHP** (Statcast, trailing 45 days, sample-gated at 25+ wOBA denominators).
+  The matchup multiplier uses the real split vs *today's* pitcher hand (shown
+  as **vs-Hand wOBA**) instead of a flat ±5-6% handedness bonus; the flat
+  prior remains only as the fallback for thin samples.
+- **Bullpen exposure** — ~35% of a hitter's PAs come after the starter
+  departs, so the matchup blends the **opposing bullpen's HR/9** (FanGraphs,
+  relievers only, shown as **Opp Pen HR/9**) at 35% weight next to the
+  starter's profile. A homer-prone starter backed by a leaky pen is the
+  juiciest environment on the board.
+
 ### HR odds
 
 Every hitter gets **Book Odds** to hit ≥1 HR: **live** from a sportsbook (The Odds
@@ -235,6 +248,17 @@ API, market `batter_home_runs`) when an `ODDS_API_KEY` env var is set and the ho
 is allowlisted, otherwise a **model-implied** market price (the vig-free fair price
 shaded by a typical HR-prop hold). **Edge%** = model HR% − book-implied HR%
 (positive = +EV); it powers the Best-value parlay strategy and the ticket EV.
+
+**The market sharpens the model** (when live odds are on):
+- **Game totals** — one cheap `totals` call per slate maps each game's
+  over/under onto a gentle run-environment multiplier (±~2.2% per run vs the
+  8.6 league norm, clamped ±8%) — the market's read on park + weather + both
+  pitchers + news, applied even to hitters without a posted HR prop.
+- **Market blend** — where a REAL book price exists, the model's HR
+  probability is shrunk **35% toward the de-vigged market price**; books see
+  scratches and news the model can't, so the blend beats either side alone.
+  The pre-blend probability is kept in `hr_prob_model`, and **Edge%** is
+  computed from the final blended estimate.
 
 **Real Total Bases & Hits lines** are **opt-in per tab** to conserve API credits:
 the everyday HR feed requests only the `batter_home_runs` market (cheapest), and

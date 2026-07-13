@@ -376,6 +376,15 @@ def _hitter_metrics(name: str, bats: str, slate_seed: str, mlbam_id, year: int,
         profile.update(splits)
         used_real = True
 
+    try:
+        from . import statcast
+        platoon = statcast.lookup_platoon(end_date_iso, mlbam_id)
+        if platoon:
+            profile.update(platoon)   # real wOBA vs LHP / vs RHP
+            used_real = True
+    except Exception:
+        pass
+
     return profile, used_real
 
 
@@ -479,6 +488,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
     real_hitters = 0
     total_hitters = 0
     real_pitchers = 0
+    try:
+        from . import statcast as _sc
+        bullpen_hr9 = _sc.get_bullpen_hr9_table(year)
+    except Exception:
+        bullpen_hr9 = {}
     rows = []
     for g in games:
         home, away = g["home"], g["away"]
@@ -528,6 +542,8 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "is_home": side == "home",
                     "game": f"{away} @ {home}",
                     "data_quality": "real" if used_real else "modeled",
+                    # ~40% of PAs come vs the pen — the OPPONENT's bullpen HR/9.
+                    "bullpen_hr9": bullpen_hr9.get(opp),
                 }
                 row.update(weather)
                 row.update(metrics)

@@ -327,18 +327,98 @@ def get_batter_pitch_splits(end_date_iso: str, lookback_days: int = 45) -> pd.Da
 
 
 @lru_cache(maxsize=4)
-def get_pitching_table(year: int) -> pd.DataFrame:
-    """Season pitcher peripherals from FanGraphs, keyed by normalized name.
+def get_batter_platoon_table(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
+    """REAL platoon splits per batter: wOBA vs LHP and vs RHP (Statcast).
 
-    Columns: pitcher_hr9, pitcher_gb_pct, pitcher_fb_pct, pitcher_barrel_pct_allowed.
-    Returns empty on failure.
+    Shares the same cached 45-day pitch-level pull as the vs-pitch-type splits.
+    Small samples (< 25 wOBA denominators vs a hand) are left NaN so a few
+    lucky PAs can't fake a platoon edge. Columns: woba_vs_l, woba_vs_r.
     """
+    sc = _statcast_range(end_date_iso, lookback_days)
+    if sc is None or "p_throws" not in sc.columns:
+        return pd.DataFrame()
+    if "woba_value" not in sc.columns or "woba_denom" not in sc.columns:
+        return pd.DataFrame()
+    df = sc[sc["woba_denom"].notna() & sc["p_throws"].isin(["L", "R"])]
+    if df.empty:
+        return pd.DataFrame()
+    grp = df.groupby(["batter", "p_throws"]).agg(
+        val=("woba_value", "sum"), den=("woba_denom", "sum")).reset_index()
+    grp["woba"] = np.where(grp["den"] >= 25, grp["val"] / grp["den"], np.nan)
+    wide = grp.pivot(index="batter", columns="p_throws", values="woba")
+    out = pd.DataFrame(index=wide.index)
+    out["woba_vs_l"] = wide.get("L", np.nan).round(3)
+    out["woba_vs_r"] = wide.get("R", np.nan).round(3)
+    out = out.dropna(how="all")
+    out.index.name = "mlbam_id"
+    return out.reset_index()
+
+
+@lru_cache(maxsize=4)
+def _fg_pitching_raw(year: int) -> pd.DataFrame:
+    """One cached FanGraphs pitching pull per year, shared by the starter
+    peripherals table and the team bullpen table."""
     if not _HAS_PYB:
         return pd.DataFrame()
     try:
         fg = pyb.pitching_stats(year, qual=0)
     except Exception:
         return pd.DataFrame()
+    return fg if fg is not None else pd.DataFrame()
+
+
+# FanGraphs team codes that differ from the MLB StatsAPI abbreviations the
+# slate uses. Extra aliases are added so either style resolves.
+_FG_TEAM_FIX = {"TBR": "TB", "KCR": "KC", "SDP": "SD", "SFG": "SF",
+                "WSN": "WSH", "CHW": "CWS"}
+_TEAM_ALIASES = {"AZ": "ARI", "ARI": "AZ", "ATH": "OAK", "OAK": "ATH"}
+
+
+@lru_cache(maxsize=4)
+def get_bullpen_hr9_table(year: int) -> dict:
+    """{team_abbr: bullpen HR/9} from FanGraphs — pure relievers (GS == 0).
+
+    ~40% of a hitter's PAs come against the pen, so the opponent's bullpen
+    homer-proneness is a real part of the matchup the starter-only view misses.
+    """
+    fg = _fg_pitching_raw(year)
+    if fg is None or fg.empty or "Team" not in fg.columns:
+        return {}
+    df = fg.copy()
+    df["GS"] = pd.to_numeric(df.get("GS"), errors="coerce").fillna(0)
+    df["IP"] = pd.to_numeric(df.get("IP"), errors="coerce").fillna(0.0)
+    df["HR"] = pd.to_numeric(df.get("HR"), errors="coerce").fillna(0.0)
+    rp = df[(df["GS"] == 0) & (df["IP"] > 0)]
+    if rp.empty:
+        return {}
+    agg = rp.groupby("Team").agg(hr=("HR", "sum"), ip=("IP", "sum"))
+    agg = agg[agg["ip"] >= 30]                      # ignore tiny team samples
+    out: dict = {}
+    for team, r in agg.iterrows():
+        abbr = _FG_TEAM_FIX.get(str(team), str(team))
+        hr9 = round(float(9.0 * r["hr"] / r["ip"]), 2)
+        out[abbr] = hr9
+        alias = _TEAM_ALIASES.get(abbr)
+        if alias:
+            out.setdefault(alias, hr9)
+    return out
+
+
+def lookup_bullpen_hr9(year: int, team_abbr: str | None) -> float | None:
+    try:
+        return get_bullpen_hr9_table(year).get(str(team_abbr)) if team_abbr else None
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=4)
+def get_pitching_table(year: int) -> pd.DataFrame:
+    """Season pitcher peripherals from FanGraphs, keyed by normalized name.
+
+    Columns: pitcher_hr9, pitcher_gb_pct, pitcher_fb_pct, pitcher_barrel_pct_allowed.
+    Returns empty on failure.
+    """
+    fg = _fg_pitching_raw(year)
     if fg is None or fg.empty:
         return pd.DataFrame()
     fg = fg.rename(columns={"Name": "name_full"})
@@ -374,6 +454,24 @@ def _batter_splits_by_id(end_date_iso: str):
 def _pitching_by_name(year: int):
     t = get_pitching_table(year)
     return t.set_index("name_key") if not t.empty else None
+
+
+@lru_cache(maxsize=2)
+def _platoon_by_id(end_date_iso: str):
+    t = get_batter_platoon_table(end_date_iso)
+    return t.set_index("mlbam_id") if not t.empty else None
+
+
+def lookup_platoon(end_date_iso: str, batter_id) -> dict | None:
+    """Real {woba_vs_l, woba_vs_r} for a batter, or None."""
+    idx = _platoon_by_id(end_date_iso)
+    if idx is None or batter_id is None or batter_id not in idx.index:
+        return None
+    row = idx.loc[batter_id]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    return {k: float(row[k]) for k in ("woba_vs_l", "woba_vs_r")
+            if k in row and not pd.isna(row[k])} or None
 
 
 def lookup_pitch_mix(end_date_iso: str, pitcher_id) -> dict | None:
