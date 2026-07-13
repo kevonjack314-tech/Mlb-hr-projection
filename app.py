@@ -877,6 +877,18 @@ def tab_previous_hrs(history):
         "rated them**, and *why* they went deep. (Live mode pulls the real lineup spot "
         "from each game's box score; the demo slate uses modeled spots.)"
     )
+    # Blank-metrics tripwire: if the season feed came back empty, say so loudly
+    # (with the feed diagnostics) instead of showing a wall of silent dashes.
+    if len(events) and "barrel_pct" in events.columns:
+        cov = float(events["barrel_pct"].notna().mean())
+        if cov < 0.5:
+            diag = [n for n in _notes if "feed issue" in n]
+            st.warning(
+                f"⚠️ Season metrics only resolved for **{cov*100:.0f}%** of these HR "
+                "hitters — a Statcast/FanGraphs pull failed. The app retries "
+                "automatically within ~10 minutes; refresh after that."
+                + ("\n\n" + "\n".join(f"- {d}" for d in diag) if diag else "")
+            )
 
     # --- Model report card: where it went right / wrong ---
     if report:
@@ -1712,6 +1724,16 @@ def main():
     (events, summary, centroid, calib, trend, player_spot, league_spot,
      score_curve, report, h_source, h_notes) = load_hr_history(
         start_iso, end_iso, prefer_live, float(half_life))
+    # Don't let a degraded pull sit in the cache for an hour: if live history
+    # came back without season metrics (a feed hiccup), clear the entry so the
+    # next refresh refetches instead of re-serving blanks.
+    if (str(h_source).startswith("LIVE") and len(events)
+            and "barrel_pct" in events.columns
+            and events["barrel_pct"].notna().mean() < 0.5):
+        load_hr_history.clear()
+    if prefer_live and "data_quality" in scored.columns \
+            and not (scored["data_quality"] == "real").any():
+        load_scored_slate.clear()
     scored = add_profile_similarity(scored, centroid)
     scored = attach_spot_signal(scored, player_spot)
     scored = attach_calibrated_prob(scored, score_curve)   # learn from past ratings
