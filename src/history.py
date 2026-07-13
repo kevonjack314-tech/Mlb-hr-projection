@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -61,12 +60,15 @@ def _seed(*parts) -> int:
 # --------------------------------------------------------------------------- #
 # 1. Gather HR history
 # --------------------------------------------------------------------------- #
-@lru_cache(maxsize=8)
 def build_hr_history(start_iso: str, end_iso: str, prefer_live: bool = True):
     """Return (events_df, slate_df, source, notes).
 
     events_df : one row per HR with the hitter's metrics + game context.
     slate_df  : every scored hitter-day in the window (for calibration).
+
+    Deliberately NOT lru_cached: the app layer caches this with a TTL, and a
+    process-lifetime cache here would pin a bad pull (blank metrics) until
+    restart. The heavy sub-pulls are cached failure-safely in statcast.py.
     """
     notes: list[str] = []
     if prefer_live:
@@ -74,6 +76,18 @@ def build_hr_history(start_iso: str, end_iso: str, prefer_live: bool = True):
         if live is not None:
             events, slate = live
             notes.append("Live HR history from Baseball Savant (Statcast).")
+            # Enrichment coverage: how many HR hitters carry real season
+            # metrics. If it's low, say WHY (feed diagnostics) in the notes.
+            cov = (float(events["barrel_pct"].notna().mean())
+                   if "barrel_pct" in events.columns and len(events) else 0.0)
+            notes.append(f"Season metrics attached for {cov*100:.0f}% of HR hitters.")
+            if cov < 0.5:
+                try:
+                    from . import statcast as _sc
+                    for src, msg in _sc.get_diagnostics().items():
+                        notes.append(f"⚠️ feed issue — {src}: {msg}")
+                except Exception:
+                    pass
             return events, slate, "LIVE (Statcast)", notes
         notes.append("Statcast host unavailable — using simulated HR history.")
 

@@ -564,6 +564,12 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
             "Statcast/FanGraphs feed unavailable (host not allowlisted or "
             "pybaseball missing) — batted-ball metrics modeled. See README."
         )
+        try:
+            from . import statcast as _sc2
+            for src, msg in _sc2.get_diagnostics().items():
+                notes.append(f"⚠️ feed issue — {src}: {msg}")
+        except Exception:
+            pass
     if real_pitchers:
         notes.append(
             f"Real pitcher peripherals + pitch mix resolved for {real_pitchers}/"

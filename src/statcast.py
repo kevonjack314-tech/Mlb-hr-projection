@@ -23,8 +23,9 @@ Required network egress hosts (add these to your environment's allowlist):
 from __future__ import annotations
 
 import datetime as dt
+import time as _time
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache  # noqa: F401  (still used by light lookups)
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,57 @@ try:  # pragma: no cover - import guarded
     _HAS_PYB = True
 except Exception:  # pragma: no cover
     _HAS_PYB = False
+
+
+# --------------------------------------------------------------------------- #
+# Caching + diagnostics
+# --------------------------------------------------------------------------- #
+_FAIL_TTL = 600.0   # seconds a FAILED pull is remembered before retrying
+
+# Last error per feed, e.g. {"season_table": "HTTPError: 502 ..."} — surfaced
+# in the app's data-provenance notes so a blank board explains itself.
+_DIAG: dict = {}
+
+
+def note_diag(source: str, msg) -> None:
+    _DIAG[source] = str(msg)[:200]
+
+
+def get_diagnostics() -> dict:
+    return dict(_DIAG)
+
+
+def _cache_ok(fn):
+    """Memoize like lru_cache — but never remember a failure for long.
+
+    lru_cache pinned EMPTY results for the process lifetime, so one transient
+    Savant/FanGraphs hiccup at boot blanked every season metric until the app
+    restarted. Here a successful (non-empty) result is cached forever, while
+    an empty/None result is only cached _FAIL_TTL seconds and then retried.
+    """
+    store: dict = {}
+
+    def wrapped(*args):
+        hit = store.get(args)
+        now = _time.time()
+        if hit is not None:
+            val, ts, ok = hit
+            if ok or (now - ts) < _FAIL_TTL:
+                return val
+        val = fn(*args)
+        ok = val is not None
+        if ok and hasattr(val, "empty"):
+            ok = not val.empty
+        elif ok and isinstance(val, dict):
+            ok = bool(val)
+        store[args] = (val, now, ok)
+        if ok:
+            _DIAG.pop(fn.__name__, None)
+        return val
+
+    wrapped.cache_clear = store.clear
+    wrapped.__name__ = fn.__name__
+    return wrapped
 
 
 def normalize_name(name: str) -> str:
@@ -77,7 +129,7 @@ def _coerce_pct(value) -> float:
     return v * 100.0 if 0 < v <= 1.0 else v
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_season_batter_table(year: int, min_bbe: int = 25) -> pd.DataFrame:
     """Season batted-ball quality + counting stats, keyed by name and MLBAM id.
 
@@ -89,13 +141,16 @@ def get_season_batter_table(year: int, min_bbe: int = 25) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         ev = pyb.statcast_batter_exitvelo_barrels(year, minBBE=min_bbe)
-    except Exception:
+    except Exception as exc:
+        note_diag("season_table (Savant EV/barrels)", exc)
         return pd.DataFrame()
     if ev is None or ev.empty:
+        note_diag("season_table (Savant EV/barrels)", "empty response")
         return pd.DataFrame()
     try:
         return _assemble_season_table(ev, year)
-    except Exception:
+    except Exception as exc:
+        note_diag("season_table (assemble)", exc)
         return pd.DataFrame()
 
 
@@ -140,8 +195,8 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
                 cols[src] = dst
         fg_small = fg[["name_key"] + list(cols)].rename(columns=cols)
         table = table.merge(fg_small, on="name_key", how="left")
-    except Exception:
-        pass
+    except Exception as exc:
+        note_diag("season_table (FanGraphs merge)", exc)
 
     # Merge Statcast expected stats (quality-of-contact power) by MLBAM id.
     # xISO = expected SLG - expected BA: pure expected power, contact-quality based.
@@ -221,7 +276,7 @@ _PITCH_FAMILY = {
 }
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def _statcast_range(end_date_iso: str, lookback_days: int = 30):
     """One cached Statcast pitch-level pull for the window. Returns df or None.
 
@@ -234,7 +289,8 @@ def _statcast_range(end_date_iso: str, lookback_days: int = 30):
     start = end - dt.timedelta(days=lookback_days)
     try:
         sc = pyb.statcast(start_dt=start.isoformat(), end_dt=end.isoformat(), verbose=False)
-    except Exception:
+    except Exception as exc:
+        note_diag("statcast_range (recent form/splits)", exc)
         return None
     if sc is None or sc.empty or "batter" not in sc.columns:
         return None
@@ -245,7 +301,7 @@ def _statcast_range(end_date_iso: str, lookback_days: int = 30):
     return sc
 
 
-@lru_cache(maxsize=8)
+@_cache_ok
 def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     """7/15/30-day HR rates per MLBAM batter id from one Statcast date-range pull.
 
@@ -278,7 +334,7 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     return table.reset_index()
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_pitch_mix_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
     """Pitch mix (% fastball/breaking/offspeed) per pitcher MLBAM id.
 
@@ -300,7 +356,7 @@ def get_pitch_mix_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFr
     return out.reset_index()
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_batter_pitch_splits(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
     """Batter wOBA vs each pitch family (real, Statcast) per MLBAM batter id.
 
@@ -326,7 +382,7 @@ def get_batter_pitch_splits(end_date_iso: str, lookback_days: int = 45) -> pd.Da
     return out.reset_index()
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_batter_platoon_table(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
     """REAL platoon splits per batter: wOBA vs LHP and vs RHP (Statcast).
 
@@ -354,7 +410,7 @@ def get_batter_platoon_table(end_date_iso: str, lookback_days: int = 45) -> pd.D
     return out.reset_index()
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def _fg_pitching_raw(year: int) -> pd.DataFrame:
     """One cached FanGraphs pitching pull per year, shared by the starter
     peripherals table and the team bullpen table."""
@@ -362,7 +418,8 @@ def _fg_pitching_raw(year: int) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         fg = pyb.pitching_stats(year, qual=0)
-    except Exception:
+    except Exception as exc:
+        note_diag("pitching_table (FanGraphs)", exc)
         return pd.DataFrame()
     return fg if fg is not None else pd.DataFrame()
 
@@ -374,7 +431,7 @@ _FG_TEAM_FIX = {"TBR": "TB", "KCR": "KC", "SDP": "SD", "SFG": "SF",
 _TEAM_ALIASES = {"AZ": "ARI", "ARI": "AZ", "ATH": "OAK", "OAK": "ATH"}
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_bullpen_hr9_table(year: int) -> dict:
     """{team_abbr: bullpen HR/9} from FanGraphs — pure relievers (GS == 0).
 
@@ -411,7 +468,7 @@ def lookup_bullpen_hr9(year: int, team_abbr: str | None) -> float | None:
         return None
 
 
-@lru_cache(maxsize=4)
+@_cache_ok
 def get_pitching_table(year: int) -> pd.DataFrame:
     """Season pitcher peripherals from FanGraphs, keyed by normalized name.
 
@@ -438,25 +495,25 @@ def get_pitching_table(year: int) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
-@lru_cache(maxsize=2)
+@_cache_ok
 def _pitch_mix_by_id(end_date_iso: str):
     t = get_pitch_mix_table(end_date_iso)
     return t.set_index("pitcher_id") if not t.empty else None
 
 
-@lru_cache(maxsize=2)
+@_cache_ok
 def _batter_splits_by_id(end_date_iso: str):
     t = get_batter_pitch_splits(end_date_iso)
     return t.set_index("mlbam_id") if not t.empty else None
 
 
-@lru_cache(maxsize=2)
+@_cache_ok
 def _pitching_by_name(year: int):
     t = get_pitching_table(year)
     return t.set_index("name_key") if not t.empty else None
 
 
-@lru_cache(maxsize=2)
+@_cache_ok
 def _platoon_by_id(end_date_iso: str):
     t = get_batter_platoon_table(end_date_iso)
     return t.set_index("mlbam_id") if not t.empty else None
@@ -512,7 +569,7 @@ def lookup_pitching(year: int, name: str | None) -> dict | None:
     return out or None
 
 
-@lru_cache(maxsize=1)
+@_cache_ok
 def _season_by_id_index(year: int):
     t = get_season_batter_table(year)
     if t.empty or "mlbam_id" not in t.columns:
@@ -520,7 +577,7 @@ def _season_by_id_index(year: int):
     return t.set_index("mlbam_id")
 
 
-@lru_cache(maxsize=1)
+@_cache_ok
 def _season_by_name_index(year: int):
     t = get_season_batter_table(year)
     if t.empty:
@@ -528,7 +585,7 @@ def _season_by_name_index(year: int):
     return t.set_index("name_key")
 
 
-@lru_cache(maxsize=1)
+@_cache_ok
 def _recent_by_id_index(end_date_iso: str):
     t = get_recent_form_table(end_date_iso)
     if t.empty:
