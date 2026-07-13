@@ -36,7 +36,6 @@ from src.lineup import (
     attach_spot_signal,
     league_spot_table,
     player_spot_hr,
-    update_log_from_history,
 )
 from src.odds import attach_odds, attach_prop_lines, format_american
 from src.parlay import ROLE_EMOJI, generate_parlay, summarize_selection
@@ -146,8 +145,10 @@ def load_hr_history(start_iso: str, end_iso: str, prefer_live: bool, half_life_d
     centroid = hr_profile_centroid(events, end_date_iso=end_iso, half_life_days=half_life_days)
     calib = calibration_table(slate_hist)
     trend = recent_trend(events, end_iso, recent_days=7)
-    # Lineup-spot HR data: grow the recurring log, then aggregate by spot.
-    update_log_from_history(slate_hist)
+    # Lineup-spot HR data: aggregate the recurring log (REAL graded hitter-days,
+    # grown daily by the GitHub Actions workflow from the eval record). The app
+    # never writes the log — slate_hist is always simulated (see history.py),
+    # so writing here would fill the log with fake rows.
     player_spot = player_spot_hr(slate_hist)
     league_spot = league_spot_table(slate_hist)
     # Self-calibration: empirical HR rate by model rating + a model report card.
@@ -551,6 +552,97 @@ def metric_bar_chart(df: pd.DataFrame, score_col: str, title: str, n: int = 15):
 # --------------------------------------------------------------------------- #
 # Tabs
 # --------------------------------------------------------------------------- #
+def _fmt(v, nd=1, suffix=""):
+    """Format a metric value; '—' when missing/NaN."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "—"
+    try:
+        return f"{float(v):.{nd}f}{suffix}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _top3_card(rank_emoji: str, row: pd.Series, headline: str, headline_val: str):
+    """One Top-3 card: matchup, odds, tier, key power metrics + the why."""
+    with st.container(border=True):
+        st.markdown(f"### {rank_emoji} {row['player']}")
+        spot = row.get("lineup_spot")
+        spot_txt = f" · batting {int(spot)}" if pd.notna(spot) else ""
+        st.caption(
+            f"{row.get('player_tier','')} · {row['team']} vs {row['opponent']}{spot_txt} · "
+            f"vs {row.get('pitcher_throws','R')}HP {row.get('pitcher_name','—')}"
+        )
+        m1, m2, m3 = st.columns(3)
+        m1.metric(headline, headline_val)
+        m2.metric("HR Prob", f"{row['hr_prob_game']*100:.0f}%")
+        m3.metric("Odds", format_american(row.get("book_odds")))
+        st.caption(
+            f"Barrel% **{_fmt(row.get('barrel_pct'))}** · "
+            f"Hard-Hit% **{_fmt(row.get('hard_hit_pct'))}** · "
+            f"FB% **{_fmt(row.get('fb_pct'))}** · "
+            f"HR/FB **{_fmt(row.get('hr_fb'))}** · "
+            f"Max EV **{_fmt(row.get('max_ev'))}** · "
+            f"ULX {row.get('ulx_grade','—')}"
+        )
+        if row.get("rationale"):
+            st.caption(f"💡 {row['rationale']}")
+
+
+def tab_top3(df: pd.DataFrame):
+    """The daily shortlist: top 3 HR picks, top 3 value plays, top 3 longshots."""
+    from src.parlay import enrich
+    st.subheader("🏆 Today's Top 3s")
+    st.caption(
+        "The daily shortlist — **Top 3 HR picks** (highest-confidence bats), "
+        "**Top 3 Value plays** (🔷 mid-tier bats the books underprice, ~+500 to "
+        "+700), and **Top 3 Longshots** (🎯 under-the-radar ceiling, +700 and up). "
+        "No player appears twice."
+    )
+    e = enrich(df)
+    used: set = set()
+
+    def take3(pool: pd.DataFrame, sort_col: str):
+        picks = pool[~pool["player"].isin(used)].sort_values(
+            sort_col, ascending=False).head(3)
+        used.update(picks["player"])
+        return picks
+
+    medals = ["🥇", "🥈", "🥉"]
+
+    st.markdown("#### ⚾ Top 3 HR Picks")
+    picks = take3(e, "hr_score")
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(picks.iterrows()):
+        with cols[i]:
+            _top3_card(medals[i], row, "HR Score", f"{row['hr_score']:.0f}")
+
+    st.markdown("#### 💰 Top 3 Value Plays")
+    val_pool = e[e["role"] == "Value"]
+    if len(val_pool) < 3:                       # thin slate: widen to mid-prob bats
+        val_pool = e[e["hr_prob_game"] >= 0.08]
+    val_pool = val_pool.assign(
+        _v=val_pool["sneaky_score"] + 0.5 * val_pool["edge_pct"].fillna(0))
+    picks = take3(val_pool, "_v")
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(picks.iterrows()):
+        with cols[i]:
+            _top3_card(medals[i], row, "Sneaky", f"{row['sneaky_score']:.0f}")
+
+    st.markdown("#### 🚀 Top 3 Longshots")
+    ls_pool = e[e["role"] == "Longshot"]
+    if len(ls_pool) < 3:
+        ls_pool = e[e["book_odds"] >= 700]
+    picks = take3(ls_pool, "longshot_score")
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(picks.iterrows()):
+        with cols[i]:
+            _top3_card(medals[i], row, "Longshot", f"{row['longshot_score']:.0f}")
+
+    st.caption("Roles follow the tier system — ⭐ stars anchor, 🔷 mid bats are the "
+               "value band, 🎯 unknowns are the longshots. Full boards live in the "
+               "other Picks views; build the ticket in 🎰 Parlays.")
+
+
 def tab_longshots(df: pd.DataFrame):
     st.subheader("🚀 Best Longshots")
     st.caption(
@@ -700,8 +792,15 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
     sheet_cols = [c for c in ["date", "player", "team", "lineup_spot", "player_tier",
                               "pitcher_name",
                               "opponent", "hr_count", "hr_score", "hr_prob_game", "role",
-                              "verdict", "barrel_pct", "max_ev", "hr_fb", "xiso",
-                              "park_factor", "recent_form_score", "rationale"]
+                              "verdict",
+                              # Pre-game metrics — the same inputs the model scores on.
+                              "barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev",
+                              "launch_angle", "fb_pct", "gb_pct", "ld_pct", "pull_pct",
+                              "hr_fb", "whiff_pct", "chase_pct", "zone_contact_pct",
+                              "xiso", "xslg", "xwoba", "hr_per_pa", "season_hr",
+                              "sprint_speed", "pitcher_hr9",
+                              "park_factor", "recent_form_score", "hr_rate_7",
+                              "rationale"]
                   if c in sheet_sorted.columns]
     show = sheet_sorted[sheet_cols].rename(columns={
         "date": "Date", "player": "Player", "team": "Team", "opponent": "Opp",
@@ -709,7 +808,14 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
         "hr_score": "Model Score",
         "hr_prob_game": "Model HR%", "role": "Role", "verdict": "Model take",
         "pitcher_name": "Starting Pitcher", "park_factor": "Park",
-        "barrel_pct": "Barrel%", "max_ev": "Max EV", "hr_fb": "HR/FB", "xiso": "xISO",
+        "barrel_pct": "Barrel%", "brl_pa": "Barrel/PA%", "hard_hit_pct": "Hard-Hit%",
+        "avg_ev": "Avg EV", "max_ev": "Max EV", "launch_angle": "Launch°",
+        "fb_pct": "Fly-Ball%", "gb_pct": "Ground-Ball%", "ld_pct": "Line-Drive%",
+        "pull_pct": "Pull%", "hr_fb": "HR/FB", "whiff_pct": "Whiff%",
+        "chase_pct": "Chase%", "zone_contact_pct": "Zone-Contact%",
+        "xiso": "xISO", "xslg": "xSLG", "xwoba": "xwOBA", "hr_per_pa": "HR/PA",
+        "season_hr": "Season HR", "sprint_speed": "Sprint",
+        "pitcher_hr9": "SP HR/9", "hr_rate_7": "HR/PA (7d)",
         "recent_form_score": "Recent Form", "rationale": "Why they hit"})
     if "Spot" in show.columns:
         show["Spot"] = show["Spot"].astype("Int64")
@@ -1011,7 +1117,7 @@ def tab_trends(history, projection_slate):
     )
 
 
-def _render_parlay(result, stake):
+def _render_parlay(result, stake, key: str = "parlay"):
     legs = result["legs"]
     s = result["summary"]
     if legs.empty or s.get("n_legs", 0) == 0:
@@ -1068,7 +1174,7 @@ def _render_parlay(result, stake):
                              "book_odds", "hr_prob_game", "edge_pct", "archetype",
                              "rationale"] if c in legs.columns]].copy()
     st.download_button("⬇️ Export parlay to CSV", disp.to_csv(index=False).encode(),
-                       file_name="hr_parlay.csv", mime="text/csv")
+                       file_name="hr_parlay.csv", mime="text/csv", key=f"dl_{key}")
 
 
 def _hr_parlay_builder(df):
@@ -1102,7 +1208,7 @@ def _hr_parlay_builder(df):
     result = generate_parlay(df, n_legs=n_legs, strategy=strategy,
                              max_per_game=int(max_per_game), diversify_arch=diversify,
                              seed=(seed or None))
-    _render_parlay(result, stake)
+    _render_parlay(result, stake, key="builder")
 
     st.markdown("---")
     with st.expander("🛠️ Build your own parlay (pick the bats)"):
@@ -1111,7 +1217,7 @@ def _hr_parlay_builder(df):
             help="Pick 1-8 bats; roles are auto-assigned from each bat's HR odds band.",
         )
         if choices:
-            _render_parlay(summarize_selection(df, choices), stake)
+            _render_parlay(summarize_selection(df, choices), stake, key="custom")
 
 
 def _mixed_ladder(df):
@@ -1266,31 +1372,48 @@ def _build_hr_insight(row) -> str:
 def _render_hr_detail(row):
     """A detail card: pre-game metrics grouped + the 'why they hit' insight."""
     st.markdown(_build_hr_insight(row))
-    g1, g2, g3 = st.columns(3)
+    g1, g2, g3, g4 = st.columns(4)
     with g1:
         st.markdown("**Power (pre-game)**")
         st.markdown(
-            f"- Barrel%: {row.get('barrel_pct','—')}\n"
-            f"- Barrel/PA%: {row.get('brl_pa','—')}\n"
-            f"- Max EV: {row.get('max_ev','—')}\n"
-            f"- xISO: {row.get('xiso','—')}\n"
-            f"- HR/FB: {row.get('hr_fb','—')}"
+            f"- Barrel%: {_fmt(row.get('barrel_pct'))}\n"
+            f"- Barrel/PA%: {_fmt(row.get('brl_pa'))}\n"
+            f"- Hard-Hit%: {_fmt(row.get('hard_hit_pct'))}\n"
+            f"- Avg EV: {_fmt(row.get('avg_ev'))} · Max EV: {_fmt(row.get('max_ev'))}\n"
+            f"- xISO: {_fmt(row.get('xiso'), 3)} · xSLG: {_fmt(row.get('xslg'), 3)}\n"
+            f"- xwOBA: {_fmt(row.get('xwoba'), 3)}\n"
+            f"- HR/FB: {_fmt(row.get('hr_fb'))} · Season HR: {_fmt(row.get('season_hr'), 0)}"
         )
     with g2:
+        st.markdown("**Batted ball & discipline**")
+        st.markdown(
+            f"- Fly-Ball%: {_fmt(row.get('fb_pct'))}\n"
+            f"- Ground-Ball%: {_fmt(row.get('gb_pct'))}\n"
+            f"- Line-Drive%: {_fmt(row.get('ld_pct'))}\n"
+            f"- Pull%: {_fmt(row.get('pull_pct'))}\n"
+            f"- Launch angle: {_fmt(row.get('launch_angle'))}°\n"
+            f"- Whiff%: {_fmt(row.get('whiff_pct'))} · Chase%: {_fmt(row.get('chase_pct'))}\n"
+            f"- Zone-Contact%: {_fmt(row.get('zone_contact_pct'))}"
+        )
+    with g3:
         st.markdown("**Context**")
         st.markdown(
             f"- Lineup spot: {int(row['lineup_spot']) if pd.notna(row.get('lineup_spot')) else '—'}\n"
-            f"- Park factor: {row.get('park_factor','—')}\n"
-            f"- Wind ×: {row.get('wind_mult','—')} · Temp: {row.get('temp_f','—')}°F\n"
+            f"- Tier: {tier_of(row.get('season_hr'))}\n"
+            f"- Park factor: {_fmt(row.get('park_factor'), 0)}\n"
+            f"- Wind ×: {_fmt(row.get('wind_mult'), 2)} · Temp: {_fmt(row.get('temp_f'), 0)}°F\n"
             f"- Platoon edge: {'yes' if row.get('platoon_adv') else 'no'}\n"
-            f"- Pitcher HR/9: {row.get('pitcher_hr9','—')}"
+            f"- Pitcher HR/9: {_fmt(row.get('pitcher_hr9'), 2)}\n"
+            f"- Sprint: {_fmt(row.get('sprint_speed'))}"
         )
-    with g3:
+    with g4:
         st.markdown("**Form & model**")
         st.markdown(
-            f"- Recent form score: {row.get('recent_form_score','—')}\n"
-            f"- HR rate 7/15/30d: {row.get('hr_rate_7','—')}/{row.get('hr_rate_15','—')}/{row.get('hr_rate_30','—')}\n"
-            f"- HR Score: {row.get('hr_score','—')}\n"
+            f"- Recent form score: {_fmt(row.get('recent_form_score'), 0)}\n"
+            f"- HR/PA 7d: {_fmt(row.get('hr_rate_7'), 3)}\n"
+            f"- HR/PA 15d: {_fmt(row.get('hr_rate_15'), 3)}\n"
+            f"- HR/PA 30d: {_fmt(row.get('hr_rate_30'), 3)}\n"
+            f"- HR Score: {_fmt(row.get('hr_score'), 0)}\n"
             f"- Model game HR%: {row.get('hr_prob_game',0)*100:.0f}%"
         )
 
@@ -1336,7 +1459,7 @@ def tab_value_finder(df):
     st.markdown("##### 🎰 One-click value parlay")
     n = st.slider("Legs", 1, 5, 3, key="vf_legs")
     res = generate_parlay(v, n_legs=n, strategy="value")
-    _render_parlay(res, 10.0)
+    _render_parlay(res, 10.0, key="vf_parlay")
 
 
 def _pick_card(label, name, sub, big, extra=""):
@@ -1614,16 +1737,19 @@ def main():
         render_hr_of_day(filtered)
         st.markdown("")
         render_top_picks(filtered)
-        st.caption("Head to **🎯 Picks** for the full boards, **🎰 Parlays** to build "
+        st.caption("Head to **🎯 Picks → 🏆 Top 3** for the daily shortlist (top 3 HR "
+                   "picks / value plays / longshots), **🎰 Parlays** to build "
                    "tickets, **🧾 Lineups** for today's orders, **📚 History** for "
                    "previous HRs & trends.")
     with t_picks:
         view = st.radio(
-            "View", ["🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
+            "View", ["🏆 Top 3", "🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
                      "💎 Value Finder", "📊 Full Board"],
             horizontal=True, label_visibility="collapsed", key="picks_view",
         )
-        if view == "🚀 Longshots":
+        if view == "🏆 Top 3":
+            tab_top3(filtered)
+        elif view == "🚀 Longshots":
             tab_longshots(filtered)
         elif view == "🎯 Consistent":
             tab_consistent(filtered)

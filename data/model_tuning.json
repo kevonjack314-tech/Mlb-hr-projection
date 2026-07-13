@@ -1,45 +1,45 @@
 {
- "n": 1048,
+ "n": 1321,
  "bins": [
   {
-   "pred": 0.063,
-   "actual": 0.0229
+   "pred": 0.0628,
+   "actual": 0.0301
   },
   {
-   "pred": 0.0849,
-   "actual": 0.0687
+   "pred": 0.0845,
+   "actual": 0.0667
   },
   {
-   "pred": 0.1,
-   "actual": 0.0687
+   "pred": 0.0994,
+   "actual": 0.0667
   },
   {
-   "pred": 0.1163,
-   "actual": 0.1069
+   "pred": 0.1164,
+   "actual": 0.103
   },
   {
-   "pred": 0.1321,
-   "actual": 0.1756
+   "pred": 0.1342,
+   "actual": 0.1515
   },
   {
-   "pred": 0.1512,
-   "actual": 0.1756
+   "pred": 0.1532,
+   "actual": 0.1515
   },
   {
-   "pred": 0.1715,
-   "actual": 0.1756
+   "pred": 0.1713,
+   "actual": 0.1515
   },
   {
-   "pred": 0.2149,
-   "actual": 0.2901
+   "pred": 0.2152,
+   "actual": 0.2788
   }
  ],
- "brier": 0.10246,
- "updated": "2026-07-11",
+ "brier": 0.10102,
+ "updated": "2026-07-12",
  "role_factors": {},
  "role_n": {
-  "Anchor": 4,
-  "Longshot": 4,
-  "Value": 4
+  "Anchor": 5,
+  "Longshot": 5,
+  "Value": 5
  }
 }

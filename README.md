@@ -49,6 +49,11 @@ keeps the lineup HR log fresh.
 ## What the app shows
 
 ### Tabs / pages
+0. **🏆 Top 3** (🎯 Picks → Top 3) — the daily shortlist: **Top 3 HR picks**
+   (highest HR Score), **Top 3 Value plays** (🔷 mid-tier bats ranked by sneaky
+   score + book edge), and **Top 3 Longshots** (🎯 under-the-radar ceiling), as
+   cards with odds, tier, Barrel% / Hard-Hit% / FB% / HR-FB / Max EV and the
+   model's rationale. No player appears twice across the three lists.
 1. **🚀 Best Longshots** — high-upside, boom-or-bust bats ranked by an
    *explosiveness* score (max EV + barrel% + favorable park/weather). Good for
    +EV HR props and DFS tournaments. Includes vig-free fair odds.
@@ -132,17 +137,18 @@ when available, else estimated. It feeds the model three ways:
   has allowed to *their* lineup spot over his last 10 games; bats in a vulnerable
   spot get a parlay role-fit boost (and the count shows on leg cards & tables).
 - **Recurring HR-by-spot log** — `data/lineup_hr_log.csv` accumulates one row per
-  hitter-day (date, player, spot, HR), de-duped, growing as the date advances. A
-  **seed log (~30 days)** ships in the repo so there's history out of the box, and
-  it keeps growing via:
+  hitter-day (date, player, spot, HR outcome, pre-game HR Score), de-duped and
+  **100% real**: it is sourced exclusively from the graded eval record
+  (`data/eval_log.csv`, built daily from live lineups + box-score outcomes), so
+  a simulated row can never enter it. It grows via:
   - the **GitHub Actions schedule** (`.github/workflows/update-lineup-log.yml`),
-    which runs daily, appends the prior day's HRs and commits the log (runners
-    have open network, so it logs **real** games), and
-  - `scripts/update_lineup_log.py` for manual/local runs (or the `/loop` skill).
+    which runs daily: grade yesterday against real box scores → retune the
+    model → copy the graded hitter-days into the lineup log → commit, and
+  - `scripts/update_lineup_log.py` for manual runs (after `daily_improve.py`).
 
-  Per-player "HRs from today's spot" and the league HR-by-spot chart come from this
-  log and nudge parlay selection. (In the bundled seed, HR/game peaks at spots
-  3–4 — exactly where real middle-of-the-order power lives.)
+  Per-player "HRs from today's spot" and the league HR-by-spot chart come from
+  this log and nudge parlay selection. The app only reads the log — it never
+  writes it.
 
 ### The prop ladder & betting pyramid (instilled)
 
