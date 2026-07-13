@@ -139,6 +139,51 @@ _PROFILE_METRIC_COLS = [
 ]
 
 
+def _eval_feature_index() -> dict:
+    """{(date, normalized player): row dict} from the graded eval record.
+
+    The eval log stores the model's full pre-game feature vector + rating for
+    every hitter-day it graded — the exact 'what the model gave that player
+    before the game' the Previous-HRs card should show."""
+    try:
+        from .statcast import normalize_name
+        from .tuning import load_eval_log
+        ev = load_eval_log()
+        if ev.empty or "barrel_pct" not in ev.columns:
+            return {}
+        ev = ev[ev["barrel_pct"].notna()]
+        keys = list(zip(ev["date"].astype(str),
+                        ev["player"].map(normalize_name)))
+        return dict(zip(keys, ev.to_dict("records")))
+    except Exception:
+        return {}
+
+
+# Skip identity/outcome columns AND anything score_slate re-derives itself —
+# re-adding those as inputs would create duplicate columns after scoring.
+_EVAL_FEAT_SKIP = {"date", "player", "team", "lineup_spot", "hit_hr",
+                   "parlay_role", "top_pick", "hr_score", "hr_prob_game",
+                   "ulx_checks", "recent_form_score", "matchup_score",
+                   "env_score", "pitch_matchup_score", "platoon_adv",
+                   "expected_pa", "woba_vs_hand", "park_factor", "wind_mult"}
+
+
+def eval_features_for(eval_idx: dict, date, player):
+    """(features, logged_scores) for one HR event from the eval record, or None."""
+    try:
+        from .statcast import normalize_name
+        rec = eval_idx.get((str(date), normalize_name(player or "")))
+        if not rec:
+            return None
+        feats = {k: v for k, v in rec.items()
+                 if k not in _EVAL_FEAT_SKIP and v is not None and v == v}
+        scored = {k: float(rec[k]) for k in ("hr_score", "hr_prob_game")
+                  if rec.get(k) is not None and rec.get(k) == rec.get(k)}
+        return (feats, scored) if feats else None
+    except Exception:
+        return None
+
+
 def _live_hr_history(start_iso: str, end_iso: str):
     """Real HR hitters straight from MLB StatsAPI box scores (batter, HR count,
     lineup spot, opposing starter), enriched with season Statcast metrics and
@@ -180,22 +225,37 @@ def _live_hr_history(start_iso: str, end_iso: str):
         # slate uses (matched by MLBAM id, then normalized name) — the code
         # path proven to attach real metrics on Streamlit Cloud. This is what
         # powers the pre-game metrics + "why they hit" insight.
-        prof_rows = []
+        # PRIMARY source: the graded eval record. It stores every metric the
+        # model actually gave the hitter BEFORE that game (logged pre-game by
+        # the daily job / backfill), so it's point-in-time correct AND immune
+        # to a live-feed outage blanking the card. Live lookups fill any gaps.
+        eval_idx = _eval_feature_index()
+        prof_rows, logged = [], []
         for _, r in events_df.iterrows():
             prof = {}
+            got = eval_features_for(eval_idx, r.get("date"), r.get("player"))
+            if got:
+                feats, scored_vals = got
+                prof.update(feats)
+                logged.append(scored_vals)   # the model's REAL pre-game numbers
+            else:
+                logged.append(None)
             try:
-                season = sc_mod.lookup_season(end.year, r.get("player"),
-                                              r.get("mlbam_id"))
-                if season:
-                    prof.update({k: v for k, v in season.items()
-                                 if k in _PROFILE_METRIC_COLS or k in
-                                 ("pa", "season_hr", "power_tier", "k_pct")})
-                recent = sc_mod.lookup_recent_form(end_iso, r.get("mlbam_id"))
-                if recent:
-                    prof.update(recent)
-                peri = sc_mod.lookup_pitching(end.year, r.get("pitcher_name"))
-                if peri:
-                    prof.update(peri)   # pitcher_hr9 / GB% / FB% for the insight
+                if not prof:
+                    season = sc_mod.lookup_season(end.year, r.get("player"),
+                                                  r.get("mlbam_id"))
+                    if season:
+                        prof.update({k: v for k, v in season.items()
+                                     if k in _PROFILE_METRIC_COLS or k in
+                                     ("pa", "season_hr", "power_tier", "k_pct")})
+                if "hr_rate_7" not in prof:
+                    recent = sc_mod.lookup_recent_form(end_iso, r.get("mlbam_id"))
+                    if recent:
+                        prof.update(recent)
+                if "pitcher_hr9" not in prof:
+                    peri = sc_mod.lookup_pitching(end.year, r.get("pitcher_name"))
+                    if peri:
+                        prof.update(peri)   # pitcher HR/9 etc. for the insight
             except Exception:
                 pass
             prof_rows.append(prof)
@@ -212,6 +272,14 @@ def _live_hr_history(start_iso: str, end_iso: str):
             events_df = score_slate(events_df)
         except Exception:
             pass
+        # Where the eval record logged the ACTUAL pre-game rating, show that —
+        # not a re-score with today's data.
+        for col in ("hr_score", "hr_prob_game"):
+            vals = [(lg or {}).get(col) for lg in logged]
+            if any(v is not None for v in vals):
+                cur = events_df.get(col, pd.Series(index=events_df.index, dtype=float))
+                events_df[col] = [v if v is not None else c
+                                  for v, c in zip(vals, cur)]
         # Calibration/report card still use the simulated full-slate-with-outcomes.
         _, slate_df = _simulated_hr_history(start_iso, end_iso)
         return events_df, slate_df
