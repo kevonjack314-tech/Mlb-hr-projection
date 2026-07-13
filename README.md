@@ -189,19 +189,31 @@ GitHub Actions workflow (open network → real games):
 
 1. **Grade yesterday** — rebuild the slate pre-game (live lineups + metrics),
    log every hitter's predicted HR probability, the **parlay legs the builder
-   would have picked** (by role) and the top-5 picks, joined to the **actual
-   HR outcomes from box scores** → appended to `data/eval_log.csv` (de-duped;
-   simulated days are never logged).
+   would have picked** (by role), the top-5 picks, **and the full ~35-feature
+   input vector** (barrel%, FB%, HR/FB, xISO, park, form, matchup, …), joined
+   to the **actual HR outcomes from box scores** → appended to
+   `data/eval_log.csv` (de-duped; simulated days are never logged).
 2. **Retune** — refit on the FULL accumulated record and commit
    `data/model_tuning.json`:
    - a **monotonic probability-calibration curve** the model applies to every
      game HR probability at scoring time (identity until ≥300 real hitter-days,
-     damped by sample size, clamped ±40%), and
+     damped by sample size, clamped ±40%),
    - **per-role parlay-leg reliability factors** (real hit rate ÷ predicted, per
-     Anchor/Value/Longshot) that recalibrate future **ticket win% and EV**.
+     Anchor/Value/Longshot) that recalibrate future **ticket win% and EV**, and
+   - a **learned feature model** — a ridge logistic regression over the logged
+     feature vectors, validated on a time-ordered holdout. It stays dormant
+     until it *beats the hand-weighted model's Brier score on unseen days*;
+     only then is its probability blended in (damped by record size, capped at
+     50%, clamped ±40%). The daily printout reports its holdout score either way.
 3. **Show the receipts** — the Trends view has a "🤖 Self-improvement track
    record" panel: days graded, Brier score, calibration status, and real
    per-role parlay-leg hit rates.
+
+**Backfill** — `scripts/backfill_eval.py` (or the "Backfill eval record"
+workflow, manually triggerable from the Actions tab) grades *past* dates the
+same way — lineups and box scores stay available on MLB StatsAPI — turning
+weeks of waiting into one run. Backfilled season-stat lookups are "as of
+today" (mild lookahead bias), an accepted trade for calibration sample size.
 
 So every day of real games makes the probabilities, the edges, and the parlay
 selections a little sharper — automatically.

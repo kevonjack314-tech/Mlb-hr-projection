@@ -36,8 +36,29 @@ MIN_ROWS_TO_APPLY = 300     # ~2 live slates before any adjustment kicks in
 FULL_TRUST_ROWS = 3000      # damping reaches full weight around here
 N_BINS = 8
 
+# Full feature vector logged with every graded hitter-day: the model's raw
+# inputs + context. This is what lets the system eventually LEARN its weights
+# from real outcomes (fit_feature_model) instead of the hand-set
+# HR_SCORE_WEIGHTS — old rows without these columns simply carry NaN.
+FEATURE_COLS = [
+    # batted-ball power
+    "barrel_pct", "brl_pa", "hard_hit_pct", "avg_ev", "max_ev", "launch_angle",
+    # batted-ball mix & plate discipline
+    "fb_pct", "gb_pct", "ld_pct", "pull_pct", "hr_fb",
+    "whiff_pct", "chase_pct", "zone_contact_pct", "k_pct",
+    # expected stats & season rates
+    "xiso", "xslg", "xwoba", "iso", "sweet_spot_pct",
+    "hr_per_pa", "season_hr", "pa",
+    # recent form
+    "hr_rate_7", "hr_rate_15", "hr_rate_30", "recent_form_score",
+    # matchup & environment
+    "platoon_adv", "pitch_matchup_score", "matchup_score", "env_score",
+    "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
+]
+
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
-             "hr_score", "ulx_checks", "parlay_role", "top_pick", "hit_hr"]
+             "hr_score", "ulx_checks", "parlay_role", "top_pick",
+             "hit_hr"] + FEATURE_COLS
 
 # Parlay-leg feedback needs at least this many logged legs per role.
 MIN_LEGS_PER_ROLE = 25
@@ -136,6 +157,126 @@ def fit_role_factors(log: pd.DataFrame) -> dict:
         factor = w * raw + (1.0 - w) * 1.0
         out["role_factors"][role] = round(float(np.clip(factor, 0.6, 1.4)), 3)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Learned feature weights (logistic model trained on the real record)
+# --------------------------------------------------------------------------- #
+FEATURE_MODEL_MIN_ROWS = 2000    # don't even fit below this
+FEATURE_MODEL_TRUST_ROWS = 10000  # blend weight reaches its 0.5 cap here
+_FM_MIN_COVERAGE = 0.7           # a feature must be present on ≥70% of rows
+
+
+def _feature_matrix(df: pd.DataFrame, feats: list[str], medians: dict) -> np.ndarray:
+    cols = []
+    for f in feats:
+        v = pd.to_numeric(df.get(f), errors="coerce")
+        cols.append(v.fillna(medians.get(f, 0.0)).to_numpy(dtype=float))
+    return np.column_stack(cols)
+
+
+def fit_feature_model(log: pd.DataFrame) -> dict:
+    """Learn HR-probability weights from the real graded record.
+
+    A ridge-regularized logistic regression over FEATURE_COLS, validated on a
+    time-ordered holdout (the most recent ~20% of days). It only goes ACTIVE
+    when it beats the hand-weighted model's Brier score on those unseen days —
+    until then it just trains and reports.
+    """
+    out = {"feature_model": {"n": 0, "active": False, "note": "warming up"}}
+    if log is None or log.empty or "hit_hr" not in log.columns:
+        return out
+    df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
+    feats = [f for f in FEATURE_COLS if f in df.columns
+             and pd.to_numeric(df[f], errors="coerce").notna().mean() >= _FM_MIN_COVERAGE]
+    rows_with_feats = df[feats].apply(pd.to_numeric, errors="coerce").notna().any(axis=1) \
+        if feats else pd.Series(False, index=df.index)
+    df = df[rows_with_feats]
+    n = len(df)
+    out["feature_model"]["n"] = int(n)
+    if n < FEATURE_MODEL_MIN_ROWS or len(feats) < 8:
+        out["feature_model"]["note"] = (
+            f"warming up ({n} rows with features; needs {FEATURE_MODEL_MIN_ROWS})")
+        return out
+
+    df = df.sort_values("date")
+    dates = sorted(df["date"].unique())
+    split = dates[max(1, int(len(dates) * 0.8)) - 1]
+    train, val = df[df["date"] <= split], df[df["date"] > split]
+    if val.empty or train.empty:
+        out["feature_model"]["note"] = "not enough distinct days for a holdout"
+        return out
+
+    medians = {f: float(pd.to_numeric(train[f], errors="coerce").median())
+               for f in feats}
+    Xt = _feature_matrix(train, feats, medians)
+    mean, std = Xt.mean(axis=0), Xt.std(axis=0)
+    std[std == 0] = 1.0
+    Xt = (Xt - mean) / std
+    yt = pd.to_numeric(train["hit_hr"], errors="coerce").to_numpy(dtype=float)
+
+    # Plain-numpy ridge logistic regression (gradient descent).
+    w = np.zeros(Xt.shape[1])
+    b = float(np.log(max(yt.mean(), 1e-3) / max(1 - yt.mean(), 1e-3)))
+    lam, lr = 1e-2, 0.5
+    for _ in range(400):
+        p = 1.0 / (1.0 + np.exp(-(Xt @ w + b)))
+        g_w = Xt.T @ (p - yt) / len(yt) + lam * w
+        g_b = float((p - yt).mean())
+        w -= lr * g_w
+        b -= lr * g_b
+
+    Xv = (_feature_matrix(val, feats, medians) - mean) / std
+    yv = pd.to_numeric(val["hit_hr"], errors="coerce").to_numpy(dtype=float)
+    pv = 1.0 / (1.0 + np.exp(-(Xv @ w + b)))
+    brier_model = float(((pv - yv) ** 2).mean())
+    base = pd.to_numeric(val["hr_prob_game"], errors="coerce").to_numpy(dtype=float)
+    brier_base = float(((base - yv) ** 2).mean())
+    active = bool(brier_model < brier_base)
+
+    out["feature_model"] = {
+        "n": int(n), "features": feats,
+        "medians": {k: round(v, 5) for k, v in medians.items()},
+        "mean": [round(float(x), 5) for x in mean],
+        "std": [round(float(x), 5) for x in std],
+        "coef": [round(float(x), 5) for x in w],
+        "intercept": round(b, 5),
+        "val_days": int(val["date"].nunique()),
+        "val_brier_model": round(brier_model, 5),
+        "val_brier_baseline": round(brier_base, 5),
+        "active": active,
+        "note": ("ACTIVE — beats the hand-weighted model on held-out days"
+                 if active else
+                 "trained, not applied — hand-weighted model still wins on holdout"),
+    }
+    return out
+
+
+def apply_feature_model(df: pd.DataFrame) -> pd.DataFrame:
+    """Blend the learned-weights probability into hr_prob_game.
+
+    No-op unless the learned model went ACTIVE (proved itself on held-out
+    days). Even then the blend weight is damped by record size and capped at
+    50%, and the result is clamped to the same sane band as calibration.
+    """
+    fm = _load_tuning().get("feature_model") or {}
+    if not fm.get("active") or df is None or df.empty or "hr_prob_game" not in df.columns:
+        return df
+    try:
+        feats = fm["features"]
+        X = _feature_matrix(df, feats, fm.get("medians", {}))
+        X = (X - np.array(fm["mean"], dtype=float)) / np.array(fm["std"], dtype=float)
+        p_learn = 1.0 / (1.0 + np.exp(-(X @ np.array(fm["coef"], dtype=float)
+                                        + float(fm["intercept"]))))
+        w = 0.5 * min(1.0, float(fm.get("n", 0)) / FEATURE_MODEL_TRUST_ROWS)
+        p_raw = pd.to_numeric(df["hr_prob_game"], errors="coerce").to_numpy(dtype=float)
+        p_out = (1.0 - w) * p_raw + w * p_learn
+        p_out = np.clip(p_out, 0.6 * p_raw, 1.4 * p_raw)
+        df = df.copy()
+        df["hr_prob_game"] = np.round(np.clip(p_out, 0.002, 0.35), 4)
+    except Exception:
+        return df
+    return df
 
 
 def role_prob_factor(role: str) -> float:
@@ -248,6 +389,8 @@ def evaluate_day(date_iso: str, prefer_live: bool = True):
     rows["hit_hr"] = rows["player"].map(
         lambda nm: int(normalize_name(nm) in hr_names))
     rows["date"] = date_iso
+    if "platoon_adv" in rows.columns:   # keep the CSV numeric (0/1, not True/False)
+        rows["platoon_adv"] = rows["platoon_adv"].fillna(False).astype(int)
     keep = rows[[c for c in EVAL_COLS if c in rows.columns]]
     note = (f"evaluated {len(keep)} hitters across {games_with_data} games; "
             f"{int(keep['hit_hr'].sum())} homered")
