@@ -25,6 +25,7 @@ from src.model import (
     HR_SCORE_WEIGHTS,
     POWER_QUALITY_WEIGHTS,
     RECENT_FORM_WEIGHTS,
+    hr_of_the_day,
     score_slate,
 )
 from src.learn import (
@@ -866,6 +867,71 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
             _render_hr_detail(sheet_sorted.head(150).iloc[opts.index(pick)])
 
 
+def tab_pick_record():
+    """🏅 The real win-loss record of the featured picks, from the graded log."""
+    st.subheader("🏅 Pick record — receipts, not vibes")
+    rec = load_pick_record()
+    if not rec.get("hotd") and not rec.get("top5"):
+        st.info("No graded picks yet — the record grows each morning when the "
+                "daily job grades yesterday's slate against real box scores.")
+        return
+    st.caption(
+        "Every pick below was logged **pre-game** by the daily grader (and the "
+        "backfill) and settled against real box scores. Hit = the player "
+        "homered that day. *Expected* = the model's own average probability — "
+        "beating it means the picks outperform what the model promised."
+    )
+
+    h = rec.get("hotd")
+    if h:
+        st.markdown("#### 🔒 HR of the Day")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Record", f"{h['wins']}-{h['losses']}")
+        c2.metric("Hit rate", f"{h['hit_rate']}%",
+                  delta=f"{h['hit_rate'] - h['expected_rate']:+.1f} vs expected")
+        c3.metric("Expected", f"{h['expected_rate']}%")
+        c4.metric("Streak", h["streak"])
+        show = h["rows"].sort_values("date", ascending=False).copy()
+        show["hr_prob_game"] = (show["hr_prob_game"] * 100).round(0)
+        show["Result"] = show["hit_hr"].map({1: "✅ HR", 0: "❌ no HR"})
+        st.dataframe(
+            show.rename(columns={"date": "Date", "player": "Pick",
+                                 "team": "Team", "hr_prob_game": "Model HR%"})
+                [["Date", "Pick", "Team", "Model HR%", "Result"]],
+            hide_index=True, use_container_width=True,
+            height=min(420, 60 + 35 * len(show)),
+        )
+
+    t = rec.get("top5")
+    if t:
+        st.markdown("#### ⭐ Top-5 picks (daily board)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Picks graded", t["picks"])
+        c2.metric("Hit rate", f"{t['hit_rate']}%",
+                  delta=f"{t['hit_rate'] - t['expected_rate']:+.1f} vs expected")
+        c3.metric("Days with ≥1 HR", f"{t['days_with_hit']}/{t['days']}",
+                  help="Days when at least one of the five picks homered.")
+        c4.metric("Avg HRs per day", t["avg_hits_per_day"])
+        bd = t["by_day"].sort_values("date", ascending=False).copy()
+        bd["Day result"] = bd["hits"].map(lambda x: "✅" * int(x) if x else "❌")
+        st.dataframe(
+            bd.rename(columns={"date": "Date", "picks": "Picks", "hits": "HRs hit"}),
+            hide_index=True, use_container_width=True,
+            height=min(380, 60 + 35 * len(bd)),
+        )
+
+    if rec.get("roles"):
+        st.markdown("#### 🎰 Parlay legs by role")
+        rows = [{"Role": f"{ROLE_EMOJI.get(r, '')} {r}", "Legs": v["legs"],
+                 "Record": f"{v['wins']}-{v['losses']}",
+                 "Hit rate %": v["hit_rate"], "Expected %": v["expected_rate"],
+                 "Edge vs expected": round(v["hit_rate"] - v["expected_rate"], 1)}
+                for r, v in rec["roles"].items()]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.caption("These same numbers feed the parlay builder's per-role "
+                   "reliability factors — roles that over-deliver get leaned into.")
+
+
 def tab_previous_hrs(history):
     (events, _summary, _centroid, _calib, _trend, league_spot, _curve, report,
      source, _notes, start_iso, end_iso, _half_life) = history
@@ -1496,21 +1562,12 @@ def _col(d, name, default):
     return d[name].fillna(default) if name in d.columns else pd.Series(default, index=d.index)
 
 
-def hr_of_the_day(df):
-    """The single highest-CONFIDENCE HR lock — blends probability, model rating,
-    floor (consistency), resemblance to recent HR hitters, the opposing SP's
-    vulnerable spot, and the self-calibration edge."""
-    if df is None or df.empty:
-        return None
-    d = df.copy()
-    prob = (_col(d, "hr_prob_game", 0) * 330).clip(0, 100)        # 0.30 -> ~99
-    base = (0.30 * prob + 0.24 * _col(d, "hr_score", 0)
-            + 0.22 * _col(d, "consistency_score", 50)
-            + 0.24 * _col(d, "profile_match", 50))
-    bonus = (_col(d, "sp_hr_at_spot", 0).clip(0, 4) * 2.5
-             + _col(d, "cal_edge_pct", 0).clip(lower=0))
-    d["confidence"] = (base + bonus).clip(0, 100)
-    return d.sort_values("confidence", ascending=False).iloc[0]
+
+
+@st.cache_data(ttl=60 * 30, show_spinner=False)
+def load_pick_record():
+    from src.tuning import load_eval_log, pick_record
+    return pick_record(load_eval_log())
 
 
 def render_hr_of_day(df):
@@ -1554,6 +1611,16 @@ def render_hr_of_day(df):
             st.caption(f"HR Score {row.get('hr_score',0):.0f} · Consistency "
                        f"{row.get('consistency_score',0):.0f}{cal_txt}")
             st.progress(min(1.0, float(row["confidence"]) / 100.0))
+    try:
+        h = load_pick_record().get("hotd")
+        if h and h["days"] >= 5:
+            st.caption(
+                f"📒 HR-of-the-Day record: **{h['wins']}-{h['losses']}** "
+                f"({h['hit_rate']}% · expected {h['expected_rate']}%) · "
+                f"streak {h['streak']} · full log in **📚 History → 🏅 Record**"
+            )
+    except Exception:
+        pass
 
 
 def render_top_picks(df):
@@ -1796,11 +1863,14 @@ def main():
         tab_lineups(filtered, end_iso, prefer_live)
     with t_history:
         hview = st.radio(
-            "View", ["📋 Previous HRs", "🔍 Trends Lab", "📈 Trends & Backtest"],
+            "View", ["📋 Previous HRs", "🏅 Record", "🔍 Trends Lab",
+                     "📈 Trends & Backtest"],
             horizontal=True, label_visibility="collapsed", key="hist_view",
         )
         if hview == "📋 Previous HRs":
             tab_previous_hrs(history)
+        elif hview == "🏅 Record":
+            tab_pick_record()
         elif hview == "🔍 Trends Lab":
             tab_trends_lab(history)
         else:

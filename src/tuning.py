@@ -59,7 +59,7 @@ FEATURE_COLS = [
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
-             "hr_score", "ulx_checks", "parlay_role", "top_pick",
+             "hr_score", "ulx_checks", "parlay_role", "top_pick", "hr_of_day",
              "hit_hr"] + FEATURE_COLS
 
 # Parlay-leg feedback needs at least this many logged legs per role.
@@ -158,6 +158,83 @@ def fit_role_factors(log: pd.DataFrame) -> dict:
         w = min(1.0, n / ROLE_TRUST_LEGS)
         factor = w * raw + (1.0 - w) * 1.0
         out["role_factors"][role] = round(float(np.clip(factor, 0.6, 1.4)), 3)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Pick record: how the featured picks have ACTUALLY done
+# --------------------------------------------------------------------------- #
+def _streak(hits: list) -> str:
+    """'W3' / 'L2' style current streak from a chronological 0/1 list."""
+    if not hits:
+        return "—"
+    last, n = hits[-1], 0
+    for h in reversed(hits):
+        if h != last:
+            break
+        n += 1
+    return f"{'W' if last else 'L'}{n}"
+
+
+def pick_record(log: pd.DataFrame) -> dict:
+    """Real win-loss record of the featured picks, from the graded eval log.
+
+    Returns {"hotd": {...}, "top5": {...}, "roles": {...}} — each with wins,
+    losses, hit rate, the model's expected rate (mean predicted prob), and a
+    chronological results table for the UI.
+    """
+    out = {"hotd": None, "top5": None, "roles": {}}
+    if log is None or log.empty or "hit_hr" not in log.columns:
+        return out
+    df = log.copy()
+    df["hit_hr"] = pd.to_numeric(df["hit_hr"], errors="coerce").fillna(0).astype(int)
+    df["hr_prob_game"] = pd.to_numeric(df["hr_prob_game"], errors="coerce")
+
+    # --- 🔒 HR of the Day: one pick per date -> W/L record ---
+    if "hr_of_day" in df.columns:
+        h = df[pd.to_numeric(df["hr_of_day"], errors="coerce").fillna(0) == 1]
+        h = h.sort_values("date").drop_duplicates("date", keep="last")
+        if not h.empty:
+            hits = h["hit_hr"].tolist()
+            out["hotd"] = {
+                "days": len(h),
+                "wins": int(sum(hits)),
+                "losses": int(len(hits) - sum(hits)),
+                "hit_rate": round(100 * sum(hits) / len(hits), 1),
+                "expected_rate": round(100 * float(h["hr_prob_game"].mean()), 1),
+                "streak": _streak(hits),
+                "rows": h[["date", "player", "team", "hr_prob_game", "hit_hr"]],
+            }
+
+    # --- ⭐ Top-5 picks: 5 picks per date ---
+    if "top_pick" in df.columns:
+        t = df[pd.to_numeric(df["top_pick"], errors="coerce").fillna(0) == 1]
+        if not t.empty:
+            by_day = (t.groupby("date")
+                       .agg(picks=("hit_hr", "size"), hits=("hit_hr", "sum"))
+                       .reset_index().sort_values("date"))
+            out["top5"] = {
+                "days": len(by_day),
+                "picks": int(by_day["picks"].sum()),
+                "wins": int(by_day["hits"].sum()),
+                "hit_rate": round(100 * by_day["hits"].sum() / by_day["picks"].sum(), 1),
+                "expected_rate": round(100 * float(t["hr_prob_game"].mean()), 1),
+                "days_with_hit": int((by_day["hits"] > 0).sum()),
+                "days_with_hit_pct": round(100 * (by_day["hits"] > 0).mean(), 1),
+                "avg_hits_per_day": round(float(by_day["hits"].mean()), 2),
+                "by_day": by_day,
+            }
+
+    # --- 🎰 Parlay legs by role ---
+    if "parlay_role" in df.columns:
+        legs = df[df["parlay_role"].astype(str).isin(["Anchor", "Value", "Longshot"])]
+        for role, grp in legs.groupby("parlay_role"):
+            w = int(grp["hit_hr"].sum())
+            out["roles"][role] = {
+                "legs": len(grp), "wins": w, "losses": len(grp) - w,
+                "hit_rate": round(100 * w / len(grp), 1),
+                "expected_rate": round(100 * float(grp["hr_prob_game"].mean()), 1),
+            }
     return out
 
 
@@ -374,6 +451,15 @@ def evaluate_day(date_iso: str, prefer_live: bool = True):
         pass
     top5 = set(scored.sort_values("hr_score", ascending=False)["player"].head(5))
     scored["top_pick"] = scored["player"].isin(top5).astype(int)
+    # The featured 🔒 HR of the Day pick (same confidence formula as the app).
+    scored["hr_of_day"] = 0
+    try:
+        from .model import hr_of_the_day
+        hotd = hr_of_the_day(scored)
+        if hotd is not None:
+            scored.loc[scored["player"] == hotd["player"], "hr_of_day"] = 1
+    except Exception:
+        pass
 
     hr_names: set = set()
     games_with_data = 0
