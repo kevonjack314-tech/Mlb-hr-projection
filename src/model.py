@@ -530,6 +530,34 @@ def _build_sneaky_reasons(row: pd.Series, out: dict) -> str:
     return "; ".join(reasons[:3]).capitalize() if reasons else ""
 
 
+def _col_or(d: pd.DataFrame, name: str, default) -> pd.Series:
+    return (d[name].fillna(default) if name in d.columns
+            else pd.Series(default, index=d.index))
+
+
+def attach_confidence(df: pd.DataFrame) -> pd.DataFrame:
+    """Add the HR-of-the-Day `confidence` (0-100): probability + model rating +
+    floor (consistency) + resemblance to recent HR hitters + SP-vulnerable-spot
+    and self-calibration bonuses. Enrichment columns missing (e.g. when grading
+    yesterday) default to neutral, so the same formula runs everywhere."""
+    d = df.copy()
+    prob = (_col_or(d, "hr_prob_game", 0) * 330).clip(0, 100)     # 0.30 -> ~99
+    base = (0.30 * prob + 0.24 * _col_or(d, "hr_score", 0)
+            + 0.22 * _col_or(d, "consistency_score", 50)
+            + 0.24 * _col_or(d, "profile_match", 50))
+    bonus = (_col_or(d, "sp_hr_at_spot", 0).clip(0, 4) * 2.5
+             + _col_or(d, "cal_edge_pct", 0).clip(lower=0))
+    d["confidence"] = (base + bonus).clip(0, 100)
+    return d
+
+
+def hr_of_the_day(df: pd.DataFrame):
+    """The single highest-confidence HR lock for the slate (or None)."""
+    if df is None or df.empty:
+        return None
+    return attach_confidence(df).sort_values("confidence", ascending=False).iloc[0]
+
+
 def score_slate(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the model to every row and return the enriched DataFrame."""
     if df is None or df.empty:

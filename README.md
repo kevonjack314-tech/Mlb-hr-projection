@@ -207,7 +207,14 @@ GitHub Actions workflow (open network → real games):
      50%, clamped ±40%). The daily printout reports its holdout score either way.
 3. **Show the receipts** — the Trends view has a "🤖 Self-improvement track
    record" panel: days graded, Brier score, calibration status, and real
-   per-role parlay-leg hit rates.
+   per-role parlay-leg hit rates. **📚 History → 🏅 Record** goes further: the
+   full **win-loss record of the featured picks** — the 🔒 HR of the Day
+   (W-L, hit rate vs the model's own expected rate, current streak, and the
+   date-by-date log with ✅/❌), the ⭐ daily top-5 board (per-pick hit rate,
+   days with ≥1 HR, HRs per day), and parlay legs by role. The HR-of-the-Day
+   banner on the 🏠 Today tab shows the running record inline. Every pick was
+   logged pre-game by the grader (`hr_of_day` / `top_pick` / `parlay_role`
+   columns in the eval log) and settled against real box scores.
 
 **Backfill** — `scripts/backfill_eval.py` (or the "Backfill eval record"
 workflow, manually triggerable from the Actions tab) grades *past* dates the
