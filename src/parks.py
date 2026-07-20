@@ -54,6 +54,81 @@ def park_hr_multiplier(team_abbr: str, bat_side: str = "R") -> float:
     return float(factor) / 100.0
 
 
+# Notable outfield wall HEIGHTS (ft). A short fence means little when the wall
+# is tall — Fenway's 310 LF line plays deep because of the 37-ft Monster.
+# Everything not listed uses a standard ~9 ft wall.
+_DEFAULT_WALL_FT = 9.0
+WALL_HEIGHTS = {
+    "BOS": {"lf": 37.0, "rf": 9.0},     # Green Monster
+    "MIN": {"lf": 9.0, "rf": 23.0},     # RF overhang wall
+    "CLE": {"lf": 19.0, "rf": 9.0},
+    "SF":  {"lf": 9.0, "rf": 25.0},     # RF arcade
+    "PIT": {"lf": 9.0, "rf": 21.0},     # Clemente wall
+    "HOU": {"lf": 19.0, "rf": 9.0},     # Crawford boxes wall
+    "BAL": {"lf": 13.0, "rf": 9.0},
+    "TEX": {"lf": 9.0, "rf": 14.0},
+}
+
+# League-average fence distances the porch edge is measured against.
+_LEAGUE_PULL_FT = 328.0
+_LEAGUE_CF_FT = 404.0
+_LEAGUE_PULL_PCT = 40.0
+
+
+def porch_fit(home_team: str, eff_bat_side: str, pull_pct=None) -> dict:
+    """How this park's REAL fence distances fit this hitter's pull side.
+
+    The aggregate handedness park factor already prices the park for an
+    *average* L/R bat — the new information here is the interaction with the
+    individual's pull rate: a dead-pull lefty gets the full benefit of a
+    314-ft right-field porch, a spray hitter barely notices it, and an
+    extreme-oppo bat can even be hurt by a deep pull field. Wall height is
+    folded into an effective distance (~0.6 ft of carry per extra ft of wall).
+
+    Returns {park_fit_mult, park_porch_ft, park_fit_note}.
+    """
+    out = {"park_fit_mult": 1.0, "park_porch_ft": None, "park_fit_note": ""}
+    park = get_park(home_team)
+    if park is None:
+        return out
+    side = "rf" if str(eff_bat_side).upper().startswith("L") else "lf"
+    dist = park.get(f"{side}_ft")
+    if dist is None or pd.isna(dist):
+        return out
+    wall = WALL_HEIGHTS.get(str(home_team), {}).get(side, _DEFAULT_WALL_FT)
+    eff_dist = float(dist) + 0.6 * (wall - _DEFAULT_WALL_FT)
+    out["park_porch_ft"] = round(eff_dist, 0)
+
+    porch_edge = (_LEAGUE_PULL_FT - eff_dist) / _LEAGUE_PULL_FT  # + = short porch
+    # Only the DEVIATION from an average pull rate adds information beyond the
+    # handedness park factor (which already covers the average bat).
+    try:
+        pull_dev = (float(pull_pct) - _LEAGUE_PULL_PCT) / _LEAGUE_PULL_PCT
+    except (TypeError, ValueError):
+        pull_dev = 0.0
+    if pull_dev != pull_dev:      # NaN
+        pull_dev = 0.0
+    pull_dev = max(-0.5, min(0.5, pull_dev))
+    mult = 1.0 + 3.0 * porch_edge * pull_dev
+
+    # Small straightaway component: a short/deep CF moves everyone a little.
+    cf = park.get("cf_ft")
+    if cf is not None and not pd.isna(cf):
+        mult *= 1.0 + 0.5 * (_LEAGUE_CF_FT - float(cf)) / _LEAGUE_CF_FT
+    out["park_fit_mult"] = float(max(0.90, min(1.12, mult)))
+
+    # The note describes the GEOMETRY and whether this bat can cash it in.
+    field = "right" if side == "rf" else "left"
+    wall_txt = f", {int(wall)}-ft wall" if wall > 12 else ""
+    if porch_edge >= 0.02 and pull_dev > 0.05:
+        out["park_fit_note"] = (f"short {field}-field porch ({int(dist)} ft"
+                                f"{wall_txt}) suits his pull side")
+    elif porch_edge <= -0.02 and pull_dev > 0.05:
+        out["park_fit_note"] = (f"deep {field} field ({int(dist)} ft"
+                                f"{wall_txt}) fights his pull side")
+    return out
+
+
 def wind_hr_multiplier(park: dict | None, wind_speed_mph: float, wind_dir_deg: float | None,
                        bat_side: str = "R") -> float:
     """Estimate the wind contribution to HR rate.
