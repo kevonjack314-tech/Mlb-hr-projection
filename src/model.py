@@ -25,6 +25,7 @@ from .parks import (
     get_park,
     humidity_hr_multiplier,
     park_hr_multiplier,
+    porch_fit,
     temp_hr_multiplier,
     wind_hr_multiplier,
 )
@@ -184,8 +185,12 @@ def environment_components(row: pd.Series) -> dict:
     humid_mult = humidity_hr_multiplier(
         row.get("humidity_pct"), park.get("altitude_ft", 0) if park else 0
     )
+    # Real fence geometry × THIS hitter's pull side: short porches reward pull
+    # power, tall/deep pull fields fight it (beyond the average-bat park factor).
+    fit = porch_fit(home_team, eff_side, row.get("pull_pct"))
 
-    env_mult = float(park_mult * wind_mult * temp_mult * humid_mult)
+    env_mult = float(park_mult * wind_mult * temp_mult * humid_mult
+                     * fit["park_fit_mult"])
     # Combined environment plausibly ranges ~0.78–1.30; map to 0-100.
     env_score = scale(env_mult, 0.85, 1.20)
     return {
@@ -194,6 +199,9 @@ def environment_components(row: pd.Series) -> dict:
         "wind_mult": round(wind_mult, 3),
         "temp_mult": round(temp_mult, 3),
         "humidity_mult": round(humid_mult, 3),
+        "park_fit_mult": round(fit["park_fit_mult"], 3),
+        "park_porch_ft": fit["park_porch_ft"],
+        "park_fit_note": fit["park_fit_note"],
         "env_mult": env_mult,
         "env_score": env_score,
     }
@@ -500,6 +508,8 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
         bits.append("wind blowing out")
     elif out["wind_mult"] <= 0.95:
         bits.append("wind blowing in")
+    if out.get("park_fit_note"):
+        bits.append(out["park_fit_note"])
     if out["platoon_adv"]:
         bits.append(f"platoon edge vs {row.get('pitcher_throws')}HP")
     hr9 = _num(row.get("pitcher_hr9"))

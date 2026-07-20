@@ -56,6 +56,8 @@ FEATURE_COLS = [
     "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
     # real platoon splits + bullpen exposure (may be sparse early on)
     "woba_vs_l", "woba_vs_r", "woba_vs_hand", "bullpen_hr9",
+    # fence geometry x pull side
+    "park_fit_mult", "park_porch_ft",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
