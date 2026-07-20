@@ -115,12 +115,19 @@ def role_fit(row: pd.Series, role: str) -> float:
     sp = row.get("sp_hr_at_spot")
     if pd.notna(sp):
         hist_bonus += float(min(7.0, float(sp) * 2.3))
-    # ULX power checklist: "profiles win parlays" — reward green checks (0-9),
-    # weighted most for Value/Longshot legs where the profile is the whole case.
+    # ULX power checklist: still a sanity signal, but dialed back — observed
+    # data (history, matchup, trends) outranks checklist points.
     checks = row.get("ulx_checks")
     if pd.notna(checks):
-        weight = 1.0 if role == "Anchor" else 1.6
+        weight = 0.5 if role == "Anchor" else 0.8
         hist_bonus += float(checks) * weight
+    # Live Trends Lab signals: bats riding a HR streak (back-to-back pattern),
+    # tiers favored by yesterday's rotation, spots hot on this weekday.
+    hist_bonus += 2.5 * float(row.get("hot_streak") or 0)
+    hist_bonus += 1.5 * float(row.get("tier_lean") or 0)
+    heat = row.get("dow_spot_heat")
+    if pd.notna(heat):
+        hist_bonus += float(heat)
     if role == "Anchor":
         return float(row.get("hr_score", 0)) + spot_bonus + hist_bonus
     if role == "Value":

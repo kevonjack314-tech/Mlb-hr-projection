@@ -148,7 +148,9 @@ def fetch_lineup_or_roster(team_id: int, game_pk: int | None) -> tuple:
                 bats = details["people"][0]["batSide"]["code"]
             except Exception:
                 bats = "R"
-            players.append((pid, person.get("fullName"), bats, pos, min(len(players) + 1, 9)))
+            # Spot UNKNOWN here — the lineup isn't posted. The slate builder
+            # fills it with the player's typical recent spot (graded record).
+            players.append((pid, person.get("fullName"), bats, pos, None))
     except Exception:
         return ()
     return tuple(players[:13])
@@ -493,6 +495,12 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         bullpen_hr9 = _sc.get_bullpen_hr9_table(year)
     except Exception:
         bullpen_hr9 = {}
+    try:
+        from .lineup import typical_spots
+        from .statcast import normalize_name as _norm
+        typ_spots = typical_spots()
+    except Exception:
+        typ_spots, _norm = {}, (lambda s: s)
     rows = []
     for g in games:
         home, away = g["home"], g["away"]
@@ -518,13 +526,17 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                 tinfo = demo.TEAMS.get(team)
                 if not tinfo:
                     continue
-                roster = [(None, n, b, p, demo.demo_spot_for_index(i) or 9)
-                          for i, (n, b, _t, p) in enumerate(tinfo["hitters"])]
+                roster = [(None, n, b, p, None)     # spots predicted below
+                          for n, b, _t, p in tinfo["hitters"]]
             park = get_park(home)
             team_name = park["team_name"] if (park and team == home) else demo.TEAMS.get(team, {}).get("name", team)
-            for pid, name, bats, pos, spot in roster:
+            for ridx, (pid, name, bats, pos, spot) in enumerate(roster):
                 if not name:
                     continue
+                if spot is None:
+                    # Lineup not posted yet: predict from where this bat has
+                    # ACTUALLY hit lately (graded record), else roster order.
+                    spot = typ_spots.get(_norm(name)) or demo.demo_spot_for_index(ridx)
                 metrics, used_real = _hitter_metrics(
                     name, bats, slate_seed, pid, year, date_iso
                 )

@@ -45,7 +45,7 @@ from src.props import BET_LABEL, BET_TYPES, attach_props, build_ladder_parlay
 from src.sources import get_slate
 from src.trends import (
     MID_HR_MIN, STAR_HR_MIN, TIER_UNDER,
-    compute_trends, rotation_hint, tier_of,
+    attach_trend_signals, compute_trends, rotation_hint, tier_of,
 )
 
 st.set_page_config(
@@ -1812,6 +1812,9 @@ def main():
     )
     sp_counts = load_sp_spot_counts(end_iso, prefer_live, _pairs)
     scored = attach_sp_spot_signal(scored, sp_counts)
+    # Live Trends Lab signals (streaks, tier rotation, spot×weekday heat) —
+    # these now carry more pick weight than the ULX checklist.
+    scored = attach_trend_signals(scored, events, game_date.strftime("%A"))
     scored = attach_odds(scored, end_iso, use_live=live_odds)
     scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
     # Real TB/Hits lines are opt-in inside the Parlays tab (extra API credits).

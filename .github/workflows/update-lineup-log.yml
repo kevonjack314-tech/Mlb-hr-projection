@@ -30,7 +30,12 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      # ALWAYS operate on main: the schedule fires on the repo's default
+      # branch (a feature branch here), which silently sent weeks of graded
+      # data to the wrong branch while the deployed app read main.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -59,5 +64,6 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "chore: daily data + model tuning update [skip ci]"
-            git push
+            git pull --rebase origin main || true
+            git push origin HEAD:main
           fi
