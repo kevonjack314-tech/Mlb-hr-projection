@@ -116,6 +116,34 @@ def update_log_from_history(slate_hist: pd.DataFrame) -> int:
     return len(combined) - len(existing)
 
 
+def typical_spots(max_games: int = 12) -> dict:
+    """{normalized player name: typical lineup spot} from the graded record.
+
+    The eval log stores each player's REAL posted batting spot for every
+    graded day, so before today's lineups post we can predict a bat's spot
+    from where he's actually hit lately (modal spot over his last N games) —
+    Schwarber leads off, Ohtani bats 1st, etc. — instead of roster order.
+    """
+    try:
+        from .statcast import normalize_name
+        from .tuning import load_eval_log
+        ev = load_eval_log()
+        if ev.empty or "lineup_spot" not in ev.columns:
+            return {}
+        ev = ev.copy()
+        ev["lineup_spot"] = pd.to_numeric(ev["lineup_spot"], errors="coerce")
+        ev = ev.dropna(subset=["lineup_spot"])
+        ev = ev[ev["lineup_spot"].between(1, 9)].sort_values("date")
+        out: dict = {}
+        for name, grp in ev.groupby("player"):
+            spots = grp["lineup_spot"].tail(max_games)
+            if len(spots):
+                out[normalize_name(str(name))] = int(spots.mode().iloc[0])
+        return out
+    except Exception:
+        return {}
+
+
 def _spot_table(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregate HR and PA (games) by lineup spot from a log/history frame."""
     g = df.groupby("lineup_spot")

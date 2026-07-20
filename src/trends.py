@@ -358,6 +358,59 @@ def compute_trends(events: pd.DataFrame) -> list[dict]:
     return out
 
 
+def attach_trend_signals(df: pd.DataFrame, events: pd.DataFrame,
+                         weekday_name: str | None = None) -> pd.DataFrame:
+    """Attach the Trends Lab's live signals to TODAY's slate, so pick ranking
+    runs on observed patterns rather than checklist points:
+
+      • hot_streak    — 1 if the bat homered on the most recent history day
+                        (rides the back-to-back / multi-HR-follow patterns),
+      • tier_lean     — +1 tier favored / −1 tier faded by yesterday's
+                        rotation (star-heavy day → lean mid/under, and vice
+                        versa), 0 when the rotation read is neutral,
+      • dow_spot_heat — 0-2: how hot the bat's lineup spot runs on this
+                        weekday across the history window.
+    """
+    df = df.copy()
+    df["hot_streak"] = 0
+    df["tier_lean"] = 0
+    df["dow_spot_heat"] = 0.0
+    ev = _prep(events)
+    if ev is None or df.empty:
+        return df
+
+    # Back-to-back: who homered on the most recent day in the window.
+    last = ev["date"].dt.date.max()
+    yesterday_hitters = set(ev.loc[ev["date"].dt.date == last, "player"])
+    df["hot_streak"] = df["player"].isin(yesterday_hitters).astype(int)
+
+    # Tier rotation lean from yesterday's tier mix.
+    shares = ev.loc[ev["date"].dt.date == last].groupby("tier")["hr_n"].sum()
+    if shares.sum() > 0 and "season_hr" in df.columns:
+        star_share = shares.get(TIER_STAR, 0) / shares.sum()
+        tiers = df["season_hr"].map(tier_of)
+        if star_share >= 0.5:      # star day -> rotation favors mid/under
+            df["tier_lean"] = tiers.map(
+                {TIER_STAR: -1, TIER_MID: 1, TIER_UNDER: 1}).fillna(0).astype(int)
+        elif star_share <= 0.25:   # quiet stars -> the big names are due
+            df["tier_lean"] = tiers.map(
+                {TIER_STAR: 1, TIER_MID: 0, TIER_UNDER: 0}).fillna(0).astype(int)
+
+    # Lineup-spot × weekday heat for TODAY's weekday.
+    if weekday_name and "lineup_spot" in df.columns:
+        d = ev.dropna(subset=["lineup_spot"])
+        d = d[d["dow"] == weekday_name]
+        if not d.empty:
+            counts = d.assign(spot=d["lineup_spot"].astype(int)) \
+                      .groupby("spot")["hr_n"].sum()
+            peak = float(counts.max()) or 1.0
+            heat = (counts / peak * 2.0).to_dict()      # 0-2 scale
+            df["dow_spot_heat"] = pd.to_numeric(
+                df["lineup_spot"], errors="coerce").map(
+                lambda s: heat.get(int(s), 0.0) if s == s else 0.0)
+    return df
+
+
 def rotation_hint(events: pd.DataFrame) -> str | None:
     """One-liner for TODAY based on yesterday's tier mix (used by the parlay tab)."""
     ev = _prep(events)

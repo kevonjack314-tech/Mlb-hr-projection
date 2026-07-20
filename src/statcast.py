@@ -92,6 +92,54 @@ def _cache_ok(fn):
     return wrapped
 
 
+_FG_API = "https://www.fangraphs.com/api/leaders/major-league/data"
+_FG_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+
+
+def _fg_api_leaders(year: int, stats: str) -> pd.DataFrame:
+    """FanGraphs leaders via their JSON API.
+
+    Fallback when pybaseball's legacy-endpoint scrape gets 403'd (their CDN
+    blocks some cloud IP ranges on the old .aspx page but serves the API).
+    `stats` is 'bat' or 'pit'. Empty DataFrame on any failure.
+    """
+    try:
+        import requests
+        r = requests.get(_FG_API, params={
+            "age": "", "pos": "all", "stats": stats, "lg": "all", "qual": "0",
+            "season": str(year), "season1": str(year), "startdate": "",
+            "enddate": "", "month": "0", "hand": "", "team": "0",
+            "pageitems": "5000", "pagenum": "1", "ind": "0", "rost": "0",
+            "players": "", "type": "8", "postseason": "",
+            "sortdir": "default", "sortstat": "WAR",
+        }, headers=_FG_HEADERS, timeout=30)
+        r.raise_for_status()
+        js = r.json()
+        data = js.get("data") if isinstance(js, dict) else js
+        df = pd.DataFrame(data or [])
+        if df.empty:
+            return df
+        renames = {}
+        if "Name" not in df.columns:
+            if "PlayerName" in df.columns:
+                renames["PlayerName"] = "Name"
+            elif "PlayerNameRoute" in df.columns:
+                renames["PlayerNameRoute"] = "Name"
+        if "Team" not in df.columns:
+            for cand in ("TeamNameAbb", "TeamName", "AbbName"):
+                if cand in df.columns:
+                    renames[cand] = "Team"
+                    break
+        return df.rename(columns=renames)
+    except Exception as exc:
+        note_diag(f"fangraphs_api ({stats})", exc)
+        return pd.DataFrame()
+
+
 def normalize_name(name: str) -> str:
     """Accent/punctuation-insensitive 'first last' key for cross-source joins."""
     if not name:
@@ -167,8 +215,19 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
             "player_id": "mlbam_id",
         }
     )
-    ev["name_full"] = (ev.get("first_name", "").astype(str).str.strip()
-                       + " " + ev.get("last_name", "").astype(str).str.strip())
+    # Savant has shipped several name layouts over time: first_name+last_name,
+    # a single "last_name, first_name" column, or player_name. Handle them all
+    # (a str default from .get() crashed here when the columns went missing).
+    if "first_name" in ev.columns and "last_name" in ev.columns:
+        ev["name_full"] = (ev["first_name"].astype(str).str.strip()
+                           + " " + ev["last_name"].astype(str).str.strip())
+    else:
+        name_col = next(
+            (c for c in ev.columns
+             if c.strip().lower().replace(" ", "") in
+             ("last_name,first_name", "player_name", "name", "player")),
+            None)
+        ev["name_full"] = ev[name_col].astype(str) if name_col else ""
     ev["name_key"] = ev["name_full"].map(normalize_name)
 
     keep = ["name_key", "mlbam_id", "barrel_pct", "brl_pa", "hard_hit_pct",
@@ -179,7 +238,13 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
 
     # Merge FanGraphs season counting stats (PA, HR, K%, xwOBA) by name.
     try:
-        fg = pyb.batting_stats(year, qual=0)
+        try:
+            fg = pyb.batting_stats(year, qual=0)
+        except Exception as exc:
+            note_diag("season_table (FanGraphs merge)", exc)
+            fg = _fg_api_leaders(year, "bat")      # CDN-403 fallback
+        if fg is None or fg.empty:
+            raise ValueError("no FanGraphs batting data")
         fg = fg.rename(columns={"Name": "name_full"})
         fg["name_key"] = fg["name_full"].map(normalize_name)
         cols = {}
@@ -415,12 +480,12 @@ def _fg_pitching_raw(year: int) -> pd.DataFrame:
     """One cached FanGraphs pitching pull per year, shared by the starter
     peripherals table and the team bullpen table."""
     if not _HAS_PYB:
-        return pd.DataFrame()
+        return _fg_api_leaders(year, "pit")
     try:
         fg = pyb.pitching_stats(year, qual=0)
     except Exception as exc:
         note_diag("pitching_table (FanGraphs)", exc)
-        return pd.DataFrame()
+        return _fg_api_leaders(year, "pit")        # CDN-403 fallback
     return fg if fg is not None else pd.DataFrame()
 
 

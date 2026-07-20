@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main          # always grade + commit against main
 
       - uses: actions/setup-python@v5
         with:
@@ -54,11 +56,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git pull --rebase origin main || true
           git add data/eval_log.csv data/model_tuning.json data/lineup_hr_log.csv 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
             git commit -m "chore: backfill eval record + retune [skip ci]"
-            git push
+            git push origin HEAD:main
           fi

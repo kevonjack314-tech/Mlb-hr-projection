@@ -403,12 +403,14 @@ def score_row(row: pd.Series) -> dict:
     # ULX: "longshots don't win parlays, PROFILES do" — the power checklist is the
     # backbone, alongside air-ball power (fly-ball rate, HR/FB, pull) and the spot's
     # HR environment.
+    # Data first, checklist second: raw batted-ball power + air-ball profile
+    # carry the score; the ULX checklist keeps a reduced sanity-check weight.
     longshot = (
-        0.24 * ulx["ulx_score"]
-        + 0.22 * out["max_ev_score"]
-        + 0.14 * out["barrel_score"]
-        + 0.10 * fb_score
-        + 0.08 * hr_fb_score
+        0.12 * ulx["ulx_score"]
+        + 0.26 * out["max_ev_score"]
+        + 0.18 * out["barrel_score"]
+        + 0.12 * fb_score
+        + 0.10 * hr_fb_score
         + 0.06 * pull_score
         + 0.10 * env["env_score"]
         + 0.06 * matchup_score
@@ -546,7 +548,12 @@ def attach_confidence(df: pd.DataFrame) -> pd.DataFrame:
             + 0.22 * _col_or(d, "consistency_score", 50)
             + 0.24 * _col_or(d, "profile_match", 50))
     bonus = (_col_or(d, "sp_hr_at_spot", 0).clip(0, 4) * 2.5
-             + _col_or(d, "cal_edge_pct", 0).clip(lower=0))
+             + _col_or(d, "cal_edge_pct", 0).clip(lower=0)
+             # Live trend signals (back-to-back streaks, tier rotation,
+             # spot×weekday heat) — observed patterns, not checklist points.
+             + _col_or(d, "hot_streak", 0) * 2.0
+             + _col_or(d, "tier_lean", 0) * 1.5
+             + _col_or(d, "dow_spot_heat", 0))
     d["confidence"] = (base + bonus).clip(0, 100)
     return d
 
