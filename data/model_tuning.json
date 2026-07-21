@@ -1,53 +1,53 @@
 {
- "n": 8483,
+ "n": 8753,
  "bins": [
   {
-   "pred": 0.0516,
-   "actual": 0.0028
+   "pred": 0.05,
+   "actual": 0.0027
   },
   {
-   "pred": 0.078,
-   "actual": 0.0283
+   "pred": 0.0769,
+   "actual": 0.0274
   },
   {
-   "pred": 0.0925,
-   "actual": 0.0481
+   "pred": 0.0915,
+   "actual": 0.0494
   },
   {
-   "pred": 0.114,
-   "actual": 0.0877
+   "pred": 0.113,
+   "actual": 0.0868
   },
   {
-   "pred": 0.1383,
-   "actual": 0.1311
+   "pred": 0.1377,
+   "actual": 0.1271
   },
   {
    "pred": 0.1525,
-   "actual": 0.1613
+   "actual": 0.1654
   },
   {
-   "pred": 0.1746,
-   "actual": 0.2094
+   "pred": 0.1753,
+   "actual": 0.2102
   },
   {
-   "pred": 0.2402,
-   "actual": 0.2837
+   "pred": 0.242,
+   "actual": 0.2907
   }
  ],
- "brier": 0.09772,
- "updated": "2026-07-20",
+ "brier": 0.09805,
+ "updated": "2026-07-21",
  "role_factors": {
-  "Anchor": 1.02,
-  "Longshot": 0.95,
-  "Value": 1.099
+  "Anchor": 1.025,
+  "Longshot": 0.947,
+  "Value": 1.104
  },
  "role_n": {
-  "Anchor": 35,
-  "Longshot": 35,
-  "Value": 35
+  "Anchor": 36,
+  "Longshot": 36,
+  "Value": 36
  },
  "feature_model": {
-  "n": 7162,
+  "n": 7432,
   "features": [
    "barrel_pct",
    "brl_pa",
@@ -234,9 +234,9 @@
    0.07984
   ],
   "intercept": -2.58724,
-  "val_days": 6,
-  "val_brier_model": 0.0687,
-  "val_brier_baseline": 0.08216,
+  "val_days": 7,
+  "val_brier_model": 0.07392,
+  "val_brier_baseline": 0.08683,
   "active": true,
   "note": "ACTIVE \u2014 beats the hand-weighted model on held-out days"
  }
