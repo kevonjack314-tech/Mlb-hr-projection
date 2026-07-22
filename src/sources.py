@@ -472,6 +472,10 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
             if mix:
                 prof.update(mix)
                 used_real = True
+            mb = statcast.lookup_meatball(end_date_iso, pitcher_id)
+            if mb is not None:
+                prof["sp_meatball_pct"] = mb   # middle-middle mistakes per 100
+                used_real = True
     except Exception:
         pass
     return prof, used_real

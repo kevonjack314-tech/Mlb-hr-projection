@@ -58,6 +58,8 @@ FEATURE_COLS = [
     "woba_vs_l", "woba_vs_r", "woba_vs_hand", "bullpen_hr9",
     # fence geometry x pull side
     "park_fit_mult", "park_porch_ft",
+    # opposing starter's meatball (middle-middle) supply
+    "sp_meatball_pct",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
