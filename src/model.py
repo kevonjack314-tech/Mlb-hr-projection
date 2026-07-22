@@ -153,7 +153,15 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
     # Barrels allowed: league ~8%. +/-1.5% per point, gentle.
     barrel_mult = np.clip(1.0 + (barrel_allowed - 8.0) * 0.012, 0.90, 1.12)
     lean_mult = {"GB": 0.93, "NEU": 1.0, "FB": 1.08}.get(lean, 1.0)
-    sp_mult = float(hr9_mult * barrel_mult * lean_mult)
+    # Meatball supply: HRs come off mistakes. Middle-middle% (league ~4.5-5%)
+    # is a less noisy, less park-polluted HR-risk signal than HR/9. +/-3% per
+    # point of meatball rate above/below ~5.
+    mb = row.get("sp_meatball_pct")
+    if mb is not None and mb == mb:
+        mb_mult = float(np.clip(1.0 + (float(mb) - 5.0) * 0.03, 0.90, 1.15))
+    else:
+        mb_mult = 1.0
+    sp_mult = float(hr9_mult * barrel_mult * lean_mult * mb_mult)
 
     # Bullpen exposure: ~35% of expected PAs come after the starter departs.
     # Gentler slope than the starter (relief HR/9 is noisier).
@@ -515,6 +523,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     hr9 = _num(row.get("pitcher_hr9"))
     if hr9 is not None and hr9 >= 1.4:
         bits.append(f"facing HR-prone arm ({hr9} HR/9)")
+    mb = _num(row.get("sp_meatball_pct"))
+    if mb is not None and mb >= 6.0:
+        bits.append(f"starter grooves it ({mb}% meatballs)")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")

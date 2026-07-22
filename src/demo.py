@@ -456,6 +456,8 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     lean_adj = {"GB": -0.25, "NEU": 0.0, "FB": 0.30}[lean]
     hr9 = max(0.4, base_hr9 + lean_adj + rng.uniform(-0.15, 0.15))
     barrel_allowed = {1: 11.0, 2: 9.5, 3: 8.0, 4: 6.8, 5: 5.5}[tier] + rng.uniform(-1, 1)
+    # Meatball (middle-middle) rate: worse pitchers groove more; league ~5%.
+    meatball = {1: 6.4, 2: 5.6, 3: 5.0, 4: 4.4, 5: 3.8}[tier] + rng.uniform(-0.5, 0.5)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
     # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
@@ -469,6 +471,7 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "pitcher_lean": lean,
         "pitcher_hr9": round(hr9, 2),
         "pitcher_barrel_pct_allowed": round(barrel_allowed, 1),
+        "sp_meatball_pct": round(meatball, 2),
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
         "pitcher_mix_fb": pmix_fb,

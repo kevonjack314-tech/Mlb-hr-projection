@@ -399,6 +399,48 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     return table.reset_index()
 
 
+def meatball_rates(pitches: pd.DataFrame, min_pitches: int = 100) -> pd.DataFrame:
+    """Middle-middle pitches per 100 ("meatballs") per pitcher.
+
+    HRs are hit off mistakes, and mistake SUPPLY varies ~2x between starters.
+    Statcast `zone` 5 is the dead-center cell of the strike zone — a direct
+    measure of how many grooved pitches a pitcher serves, less noisy and less
+    park-polluted than HR/9. Pure function so it's unit-testable offline.
+    """
+    if pitches is None or pitches.empty or not {"zone", "pitcher"} <= set(pitches.columns):
+        return pd.DataFrame()
+    df = pitches[pitches["zone"].notna()]
+    if df.empty:
+        return pd.DataFrame()
+    grp = df.groupby("pitcher")["zone"].agg(n="size", mb=lambda s: int((s == 5).sum()))
+    grp = grp[grp["n"] >= min_pitches]
+    if grp.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame({"sp_meatball_pct": (grp["mb"] / grp["n"] * 100.0).round(2)})
+    out.index.name = "pitcher_id"
+    return out.reset_index()
+
+
+@_cache_ok
+def get_meatball_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
+    return meatball_rates(_statcast_range(end_date_iso, lookback_days))
+
+
+@_cache_ok
+def _meatball_by_id(end_date_iso: str):
+    t = get_meatball_table(end_date_iso)
+    return t.set_index("pitcher_id") if not t.empty else None
+
+
+def lookup_meatball(end_date_iso: str, pitcher_id) -> float | None:
+    idx = _meatball_by_id(end_date_iso)
+    if idx is None or pitcher_id is None or pitcher_id not in idx.index:
+        return None
+    v = idx.loc[pitcher_id, "sp_meatball_pct"]
+    v = v.iloc[0] if hasattr(v, "iloc") else v
+    return float(v) if v == v else None
+
+
 @_cache_ok
 def get_pitch_mix_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
     """Pitch mix (% fastball/breaking/offspeed) per pitcher MLBAM id.
