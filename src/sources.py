@@ -98,6 +98,8 @@ def fetch_schedule(date_iso: str) -> tuple:
                 {
                     "game_pk": g.get("gamePk"),
                     "game_datetime": g.get("gameDate"),
+                    "series_game": g.get("seriesGameNumber"),
+                    "series_length": g.get("gamesInSeries"),
                     "home": home_abbr,
                     "away": away_abbr,
                     "home_id": home.get("id"),
@@ -593,6 +595,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     # ~40% of PAs come vs the pen — the OPPONENT's bullpen HR/9.
                     "bullpen_hr9": bullpen_hr9.get(opp),
                     "is_night": is_night,   # start-time park effect
+                    "series_game": g.get("series_game"),   # familiarity within series
                 }
                 row.update(weather)
                 row.update(metrics)

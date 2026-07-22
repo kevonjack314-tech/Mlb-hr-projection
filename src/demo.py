@@ -543,6 +543,8 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
         # Independent seed so this doesn't perturb the deterministic slate that
         # existing tests/fixtures depend on. ~65% of MLB games are night games.
         is_night = (_seed_int(slate_seed, home, "daynight") % 100) < 65
+        # Which game of the series (1-3); independent seed keeps the slate stable.
+        series_game = (_seed_int(slate_seed, home, away, "series") % 3) + 1
 
         for side, team, opp, opp_pitcher in (
             ("away", away, home, home_pitcher),
@@ -568,6 +570,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "wind_dir_deg": wind_dir,
                     "humidity_pct": humidity,
                     "is_night": is_night,
+                    "series_game": series_game,
                 }
                 row.update(prof)
                 row.update(opp_pitcher)
