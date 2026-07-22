@@ -197,6 +197,17 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
 
     mult = float(blended * _platoon_multiplier(row))
 
+    # Series familiarity: hitters see the SAME staff (starter + pen) on
+    # consecutive days and measurably improve within a series as they re-see
+    # arms and pitch shapes. Game 1 neutral; game 3+ a small edge.
+    sg = row.get("series_game")
+    if sg is not None and sg == sg:
+        try:
+            fam = {1: 1.0, 2: 1.015, 3: 1.03, 4: 1.035}.get(int(sg), 1.03)
+        except (TypeError, ValueError):
+            fam = 1.0
+        mult *= fam
+
     # A 0-100 sub-score: center the multiplier (~0.75–1.45 plausible) onto 0-100.
     score = scale(mult, 0.80, 1.30)
     return mult, score
@@ -589,6 +600,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     vs_fb = _num(row.get("vs_fb"))
     if (hc_fb is not None and hc_fb >= 62 and vs_fb is not None and vs_fb >= 0.360):
         bits.append("can sit dead-red vs a predictable-fastball arm")
+    sg = _num(row.get("series_game"))
+    if sg is not None and sg >= 3:
+        bits.append(f"3rd+ game of the series — familiar with the staff")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")
