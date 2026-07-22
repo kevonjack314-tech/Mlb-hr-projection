@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from .parks import (
+    daynight_hr_multiplier,
     get_park,
     humidity_hr_multiplier,
     park_hr_multiplier,
@@ -218,9 +219,12 @@ def environment_components(row: pd.Series) -> dict:
     # Real fence geometry × THIS hitter's pull side: short porches reward pull
     # power, tall/deep pull fields fight it (beyond the average-bat park factor).
     fit = porch_fit(home_team, eff_side, row.get("pull_pct"))
+    # Start-time park effect: marine layer at night (SF/SD), Wrigley day games,
+    # etc. Roofed parks are neutral; unknown start time is neutral.
+    dn_mult = daynight_hr_multiplier(home_team, row.get("is_night"))
 
     env_mult = float(park_mult * wind_mult * temp_mult * humid_mult
-                     * fit["park_fit_mult"])
+                     * fit["park_fit_mult"] * dn_mult)
     # Combined environment plausibly ranges ~0.78–1.30; map to 0-100.
     env_score = scale(env_mult, 0.85, 1.20)
     return {
@@ -232,6 +236,7 @@ def environment_components(row: pd.Series) -> dict:
         "park_fit_mult": round(fit["park_fit_mult"], 3),
         "park_porch_ft": fit["park_porch_ft"],
         "park_fit_note": fit["park_fit_note"],
+        "daynight_mult": round(dn_mult, 3),
         "env_mult": env_mult,
         "env_score": env_score,
     }
@@ -548,6 +553,11 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
         bits.append("wind blowing in")
     if out.get("park_fit_note"):
         bits.append(out["park_fit_note"])
+    dn = out.get("daynight_mult", 1.0)
+    if dn >= 1.03:
+        bits.append("day game plays big here")
+    elif dn <= 0.96:
+        bits.append("night marine-layer park suppresses HRs")
     if out["platoon_adv"]:
         bits.append(f"platoon edge vs {row.get('pitcher_throws')}HP")
     hr9 = _num(row.get("pitcher_hr9"))
