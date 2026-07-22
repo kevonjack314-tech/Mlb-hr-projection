@@ -463,6 +463,9 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     velo_base = round(rng.uniform(91.0, 97.0), 1)
     velo_delta = round(rng.choices([rng.uniform(-0.4, 0.4), rng.uniform(-2.2, -1.0)],
                                    weights=[0.8, 0.2])[0], 1)
+    # 3rd-time-through wOBA lift: league ~+0.02-0.03, worse arms fade harder.
+    tto_penalty = round({1: 0.045, 2: 0.035, 3: 0.028, 4: 0.020, 5: 0.012}[tier]
+                        + rng.uniform(-0.010, 0.010), 3)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
     # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
@@ -480,6 +483,7 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "sp_velo_base": velo_base,
         "sp_velo_last": round(velo_base + velo_delta, 1),
         "sp_velo_delta": velo_delta,
+        "sp_tto_penalty": tto_penalty,
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
         "pitcher_mix_fb": pmix_fb,

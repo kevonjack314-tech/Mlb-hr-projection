@@ -172,6 +172,19 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
         velo_mult = 1.0
     sp_mult = float(hr9_mult * barrel_mult * lean_mult * mb_mult * velo_mult)
 
+    # Times-through-the-order: the 3rd look at a starter is his most homer-prone,
+    # but only top-of-order bats (spots 1-4) reliably GET that 3rd PA before the
+    # bullpen. Cross the starter's real 3rd-time wOBA lift with the lineup spot.
+    tto = row.get("sp_tto_penalty")
+    spot = row.get("lineup_spot")
+    if tto is not None and tto == tto and spot is not None and spot == spot:
+        try:
+            reach = {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.65, 5: 0.4}.get(int(spot), 0.2)
+        except (TypeError, ValueError):
+            reach = 0.2
+        # A +0.030 wOBA 3rd-time penalty on a leadoff bat ~ +6% HR mult.
+        sp_mult *= float(np.clip(1.0 + float(tto) * reach * 2.0, 0.94, 1.10))
+
     # Bullpen exposure: ~35% of expected PAs come after the starter departs.
     # Gentler slope than the starter (relief HR/9 is noisier).
     pen_hr9 = row.get("bullpen_hr9")
@@ -538,6 +551,10 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     dv = _num(row.get("sp_velo_delta"))
     if dv is not None and dv <= -1.0:
         bits.append(f"starter's velo down {abs(dv)} mph last start")
+    tto = _num(row.get("sp_tto_penalty"))
+    spot = _num(row.get("lineup_spot"))
+    if tto is not None and tto >= 0.030 and spot is not None and spot <= 4:
+        bits.append("top of order reaches a fade-prone starter's 3rd time through")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")

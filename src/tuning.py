@@ -62,6 +62,8 @@ FEATURE_COLS = [
     "sp_meatball_pct",
     # opposing starter's fastball velo trend (last start vs baseline)
     "sp_velo_delta", "sp_velo_last",
+    # opposing starter's 3rd-time-through-the-order wOBA penalty
+    "sp_tto_penalty",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
