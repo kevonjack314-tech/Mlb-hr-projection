@@ -458,6 +458,11 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     barrel_allowed = {1: 11.0, 2: 9.5, 3: 8.0, 4: 6.8, 5: 5.5}[tier] + rng.uniform(-1, 1)
     # Meatball (middle-middle) rate: worse pitchers groove more; league ~5%.
     meatball = {1: 6.4, 2: 5.6, 3: 5.0, 4: 4.4, 5: 3.8}[tier] + rng.uniform(-0.5, 0.5)
+    # Fastball velo: season baseline, with a mostly-flat last-start delta and
+    # an occasional dead-arm dip (fatigue) that raises HR risk.
+    velo_base = round(rng.uniform(91.0, 97.0), 1)
+    velo_delta = round(rng.choices([rng.uniform(-0.4, 0.4), rng.uniform(-2.2, -1.0)],
+                                   weights=[0.8, 0.2])[0], 1)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
     # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
@@ -472,6 +477,9 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "pitcher_hr9": round(hr9, 2),
         "pitcher_barrel_pct_allowed": round(barrel_allowed, 1),
         "sp_meatball_pct": round(meatball, 2),
+        "sp_velo_base": velo_base,
+        "sp_velo_last": round(velo_base + velo_delta, 1),
+        "sp_velo_delta": velo_delta,
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
         "pitcher_mix_fb": pmix_fb,

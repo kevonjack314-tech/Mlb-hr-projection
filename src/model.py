@@ -161,7 +161,16 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
         mb_mult = float(np.clip(1.0 + (float(mb) - 5.0) * 0.03, 0.90, 1.15))
     else:
         mb_mult = 1.0
-    sp_mult = float(hr9_mult * barrel_mult * lean_mult * mb_mult)
+    # Fastball velo decline: down 1+ mph last start = fatigue/injury tell;
+    # HR risk rises. Only penalize DROPS (dead-arm), small bump for upticks.
+    dv = row.get("sp_velo_delta")
+    if dv is not None and dv == dv:
+        dv = float(dv)
+        velo_mult = float(np.clip(1.0 - dv * 0.04, 0.97, 1.12)) if dv < 0 \
+            else float(np.clip(1.0 - dv * 0.015, 0.95, 1.0))
+    else:
+        velo_mult = 1.0
+    sp_mult = float(hr9_mult * barrel_mult * lean_mult * mb_mult * velo_mult)
 
     # Bullpen exposure: ~35% of expected PAs come after the starter departs.
     # Gentler slope than the starter (relief HR/9 is noisier).
@@ -526,6 +535,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     mb = _num(row.get("sp_meatball_pct"))
     if mb is not None and mb >= 6.0:
         bits.append(f"starter grooves it ({mb}% meatballs)")
+    dv = _num(row.get("sp_velo_delta"))
+    if dv is not None and dv <= -1.0:
+        bits.append(f"starter's velo down {abs(dv)} mph last start")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")
