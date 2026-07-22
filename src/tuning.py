@@ -60,6 +60,8 @@ FEATURE_COLS = [
     "park_fit_mult", "park_porch_ft",
     # opposing starter's meatball (middle-middle) supply
     "sp_meatball_pct",
+    # opposing starter's fastball velo trend (last start vs baseline)
+    "sp_velo_delta", "sp_velo_last",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",

@@ -441,6 +441,59 @@ def lookup_meatball(end_date_iso: str, pitcher_id) -> float | None:
     return float(v) if v == v else None
 
 
+def velo_deltas(pitches: pd.DataFrame, min_fb: int = 15) -> pd.DataFrame:
+    """Fastball velocity change: last start vs the season-window baseline.
+
+    A starter down 1+ mph on his fastball in his most recent outing is the best
+    public early-warning of fatigue/injury — HR rates spike against diminished
+    velo before ERA catches up, and books adjust slowly. Pure function.
+
+    Returns per-pitcher: sp_velo_last, sp_velo_base, sp_velo_delta (last-base).
+    """
+    need = {"pitcher", "game_date", "release_speed", "pitch_family"}
+    if pitches is None or pitches.empty or not need <= set(pitches.columns):
+        return pd.DataFrame()
+    fb = pitches[(pitches["pitch_family"] == "fb")
+                 & pitches["release_speed"].notna()
+                 & pitches["game_date"].notna()].copy()
+    if fb.empty:
+        return pd.DataFrame()
+    rows = []
+    for pid, g in fb.groupby("pitcher"):
+        last_day = g["game_date"].max()
+        last = g[g["game_date"] == last_day]["release_speed"]
+        base = g[g["game_date"] < last_day]["release_speed"]
+        if len(last) < min_fb or len(base) < min_fb:
+            continue
+        lv, bv = float(last.mean()), float(base.mean())
+        rows.append({"pitcher_id": pid, "sp_velo_last": round(lv, 1),
+                     "sp_velo_base": round(bv, 1), "sp_velo_delta": round(lv - bv, 1)})
+    return pd.DataFrame(rows)
+
+
+@_cache_ok
+def get_velo_table(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
+    # Wider window so a starter has multiple outings to baseline against.
+    return velo_deltas(_statcast_range(end_date_iso, lookback_days))
+
+
+@_cache_ok
+def _velo_by_id(end_date_iso: str):
+    t = get_velo_table(end_date_iso)
+    return t.set_index("pitcher_id") if not t.empty else None
+
+
+def lookup_velo(end_date_iso: str, pitcher_id) -> dict | None:
+    idx = _velo_by_id(end_date_iso)
+    if idx is None or pitcher_id is None or pitcher_id not in idx.index:
+        return None
+    row = idx.loc[pitcher_id]
+    if hasattr(row, "iloc") and getattr(row, "ndim", 1) > 1:
+        row = row.iloc[0]
+    return {k: float(row[k]) for k in ("sp_velo_last", "sp_velo_base", "sp_velo_delta")
+            if k in row and row[k] == row[k]} or None
+
+
 @_cache_ok
 def get_pitch_mix_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
     """Pitch mix (% fastball/breaking/offspeed) per pitcher MLBAM id.

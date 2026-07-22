@@ -476,6 +476,10 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
             if mb is not None:
                 prof["sp_meatball_pct"] = mb   # middle-middle mistakes per 100
                 used_real = True
+            velo = statcast.lookup_velo(end_date_iso, pitcher_id)
+            if velo:
+                prof.update(velo)              # last-start velo vs baseline
+                used_real = True
     except Exception:
         pass
     return prof, used_real
