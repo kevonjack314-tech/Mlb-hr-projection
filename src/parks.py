@@ -74,6 +74,39 @@ _LEAGUE_PULL_FT = 328.0
 _LEAGUE_CF_FT = 404.0
 _LEAGUE_PULL_PCT = 40.0
 
+# Day/night HR modifier per park (multiplier applied to the park factor).
+# Some parks play very differently by start time: the marine layer settles at
+# night in the Bay Area / San Diego (ball dies), Wrigley's day games with the
+# wind blowing out are a launching pad, and afternoon heat carries in some
+# parks. Roofed parks are climate-controlled -> no day/night effect. Anything
+# unlisted uses a mild default (day games carry slightly better on average).
+DAYNIGHT_HR = {
+    "SF":  {"day": 1.05, "night": 0.94},   # marine layer at night
+    "SD":  {"day": 1.04, "night": 0.95},   # coastal night air
+    "OAK": {"day": 1.03, "night": 0.96},
+    "SEA": {"day": 1.03, "night": 0.97},
+    "CHC": {"day": 1.06, "night": 0.98},   # Wrigley day games play big
+    "COL": {"day": 1.02, "night": 1.00},   # thin air dominates anyway
+    "LAD": {"day": 1.02, "night": 0.99},
+    "BOS": {"day": 1.02, "night": 0.99},
+}
+_DEFAULT_DAYNIGHT = {"day": 1.02, "night": 0.99}
+_ROOFED = {"ARI", "HOU", "MIA", "MIL", "TB", "TEX", "TOR"}   # retractable/dome
+
+
+def daynight_hr_multiplier(team_abbr: str, is_night) -> float:
+    """HR multiplier for the start-time effect at this park (1.0 = neutral).
+
+    is_night: truthy for night games. Roofed parks are climate-controlled and
+    return 1.0. Missing start-time info -> neutral.
+    """
+    if is_night is None or (isinstance(is_night, float) and is_night != is_night):
+        return 1.0
+    if str(team_abbr) in _ROOFED:
+        return 1.0
+    table = DAYNIGHT_HR.get(str(team_abbr), _DEFAULT_DAYNIGHT)
+    return float(table["night" if is_night else "day"])
+
 
 def porch_fit(home_team: str, eff_bat_side: str, pull_pct=None) -> dict:
     """How this park's REAL fence distances fit this hitter's pull side.

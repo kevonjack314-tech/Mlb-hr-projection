@@ -66,6 +66,8 @@ FEATURE_COLS = [
     "sp_tto_penalty",
     # opposing starter's fastball rate in hitter's counts (predictability)
     "sp_hitter_count_fb",
+    # start-time park effect (day/night)
+    "daynight_mult",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",

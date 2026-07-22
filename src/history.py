@@ -166,7 +166,7 @@ _EVAL_FEAT_SKIP = {"date", "player", "team", "lineup_spot", "hit_hr",
                    "ulx_checks", "recent_form_score", "matchup_score",
                    "env_score", "pitch_matchup_score", "platoon_adv",
                    "expected_pa", "woba_vs_hand", "park_factor", "wind_mult",
-                   "park_fit_mult", "park_porch_ft"}
+                   "park_fit_mult", "park_porch_ft", "daynight_mult"}
 
 
 def eval_features_for(eval_idx: dict, date, player):

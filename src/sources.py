@@ -47,6 +47,25 @@ def _get_json(url: str, params: dict | None = None) -> dict | None:
         return None
 
 
+def _game_is_night(game_datetime_iso, park) -> bool | None:
+    """Night game? Convert the UTC first-pitch to LOCAL time via the park's
+    longitude (~15°/hr) and call it night if local first pitch is >= 6pm.
+    Returns None when start time or park is unknown (neutral downstream)."""
+    if not game_datetime_iso or park is None:
+        return None
+    try:
+        s = str(game_datetime_iso).replace("Z", "+00:00")
+        utc = dt.datetime.fromisoformat(s)
+        lon = float(park.get("lon"))
+        # Whole-hour timezone offset from longitude, +1 for DST (the MLB
+        # regular season is entirely in daylight-saving time).
+        offset = round(lon / 15.0) + 1
+        local_hour = (utc.hour + utc.minute / 60.0 + offset) % 24
+        return not (10.0 <= local_hour < 18.0)        # day window ~10a-6p
+    except Exception:
+        return None
+
+
 @lru_cache(maxsize=64)
 def fetch_schedule(date_iso: str) -> tuple:
     """Return a tuple of game dicts for the date, or () on failure.
@@ -523,6 +542,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         home_hand = fetch_pitcher_hand(g.get("home_pitcher_id"))
         away_hand = fetch_pitcher_hand(g.get("away_pitcher_id"))
         weather = fetch_weather(home, date_iso)
+        is_night = _game_is_night(g.get("game_datetime"), get_park(home))
 
         home_pitcher, hp_real = _pitcher_metrics(
             g.get("home_pitcher_name"), home_hand, home, slate_seed,
@@ -572,6 +592,7 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "data_quality": "real" if used_real else "modeled",
                     # ~40% of PAs come vs the pen — the OPPONENT's bullpen HR/9.
                     "bullpen_hr9": bullpen_hr9.get(opp),
+                    "is_night": is_night,   # start-time park effect
                 }
                 row.update(weather)
                 row.update(metrics)
