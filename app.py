@@ -631,6 +631,82 @@ def _top3_card(rank_emoji: str, row: pd.Series, headline: str, headline_val: str
             st.caption(f"💡 {row['rationale']}")
 
 
+def _team_pick_line(rank: str, row: pd.Series) -> None:
+    """One compact per-team HR pick inside a matchup card."""
+    spot = row.get("lineup_spot")
+    spot_txt = f" · bats {int(spot)}" if pd.notna(spot) else ""
+    odds = format_american(row.get("book_odds"))
+    st.markdown(f"**{rank} {row['player']}** — {row['hr_prob_game']*100:.0f}% · {odds}"
+                f"  \n<span style='opacity:0.75;font-size:0.85em'>"
+                f"{row.get('player_tier','')}{spot_txt} · HR Score {row.get('hr_score',0):.0f} · "
+                f"Barrel% {_fmt(row.get('barrel_pct'))} · HR/FB {_fmt(row.get('hr_fb'))} · "
+                f"Max EV {_fmt(row.get('max_ev'))} · ULX {row.get('ulx_grade','—')}</span>",
+                unsafe_allow_html=True)
+    if row.get("rationale"):
+        st.caption(f"💡 {row['rationale']}")
+
+
+def tab_by_matchup(df: pd.DataFrame):
+    """Top 2 HR picks for EVERY team in EVERY game — a full slate breakdown."""
+    st.subheader("⚔️ Top 2 by Team — every game")
+    st.caption(
+        "The **two most likely home-run hitters for each team in each game** on "
+        "the slate, ranked by the full model (HR probability with every signal "
+        "baked in). Both sides of every matchup — a complete game-by-game board."
+    )
+    if df.empty or "game" not in df.columns:
+        st.warning("No games on the slate.")
+        return
+
+    n_games = df["game"].nunique()
+    total_hitters = len(df)
+    top = df.sort_values("hr_prob_game", ascending=False).iloc[0]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Games", n_games)
+    c2.metric("Teams covered", df["team"].nunique())
+    c3.metric("Slate's top bat", top["player"], f"{top['hr_prob_game']*100:.0f}%")
+
+    # Order games by their single best HR bat, so the juiciest matchup leads.
+    game_rank = (df.groupby("game")["hr_prob_game"].max()
+                 .sort_values(ascending=False))
+    ranks = ["🥇", "🥈"]
+    for game in game_rank.index:
+        g = df[df["game"] == game]
+        # Home team on the right, away on the left ("AWAY @ HOME").
+        teams = list(g.sort_values("is_home")["team"].unique()) \
+            if "is_home" in g.columns else list(g["team"].unique())
+        with st.container(border=True):
+            st.markdown(f"#### {game}")
+            cols = st.columns(len(teams))
+            for col, team in zip(cols, teams):
+                tg = g[g["team"] == team].sort_values("hr_prob_game", ascending=False)
+                if tg.empty:
+                    continue
+                opp = tg.iloc[0].get("opponent", "")
+                sp = tg.iloc[0].get("pitcher_name", "—")
+                sp_hand = tg.iloc[0].get("pitcher_throws", "R")
+                with col:
+                    st.markdown(f"**{team}** vs {sp_hand}HP {sp}")
+                    for rank, (_, row) in zip(ranks, tg.head(2).iterrows()):
+                        _team_pick_line(rank, row)
+
+    # One-click CSV of every team's top 2.
+    picks = (df.sort_values("hr_prob_game", ascending=False)
+             .groupby(["game", "team"]).head(2)
+             .sort_values(["game", "hr_prob_game"], ascending=[True, False]))
+    show_cols = [c for c in ["game", "team", "opponent", "player", "player_tier",
+                             "lineup_spot", "pitcher_name", "hr_prob_game",
+                             "hr_score", "book_odds", "barrel_pct", "hr_fb",
+                             "max_ev", "ulx_grade", "rationale"] if c in picks.columns]
+    export = picks[show_cols].copy()
+    if "hr_prob_game" in export.columns:
+        export["hr_prob_game"] = (export["hr_prob_game"] * 100).round(0)
+    st.download_button("⬇️ Export every team's top 2 to CSV",
+                       export.to_csv(index=False).encode(),
+                       file_name="top2_by_team.csv", mime="text/csv",
+                       key="dl_top2_team")
+
+
 def tab_top3(df: pd.DataFrame):
     """The daily shortlist: top 3 HR picks, top 3 value plays, top 3 longshots."""
     from src.parlay import enrich
@@ -1877,12 +1953,14 @@ def main():
                    "previous HRs & trends.")
     with t_picks:
         view = st.radio(
-            "View", ["🏆 Top 3", "🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
-                     "💎 Value Finder", "📊 Full Board"],
+            "View", ["🏆 Top 3", "⚔️ Top 2 by Team", "🚀 Longshots", "🎯 Consistent",
+                     "🕵️ Sneaky", "💎 Value Finder", "📊 Full Board"],
             horizontal=True, label_visibility="collapsed", key="picks_view",
         )
         if view == "🏆 Top 3":
             tab_top3(filtered)
+        elif view == "⚔️ Top 2 by Team":
+            tab_by_matchup(filtered)
         elif view == "🚀 Longshots":
             tab_longshots(filtered)
         elif view == "🎯 Consistent":
