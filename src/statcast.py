@@ -471,6 +471,57 @@ def velo_deltas(pitches: pd.DataFrame, min_fb: int = 15) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def tto_penalties(pitches: pd.DataFrame, min_pa: int = 30) -> pd.DataFrame:
+    """Third-time-through-the-order penalty per pitcher.
+
+    League-wide, production jumps the 3rd time a lineup sees a starter, but the
+    size varies a lot by pitcher. Uses Statcast `n_thruorder_pitcher` and wOBA
+    value/denom to measure each starter's 3rd-time wOBA-allowed lift over his
+    1st+2nd. Only bats near the top of the order actually reach that 3rd look,
+    so the model crosses this with lineup spot. Pure function.
+
+    Returns per-pitcher: sp_tto_penalty (3rd-time wOBA minus early wOBA).
+    """
+    need = {"pitcher", "n_thruorder_pitcher", "woba_value", "woba_denom"}
+    if pitches is None or pitches.empty or not need <= set(pitches.columns):
+        return pd.DataFrame()
+    df = pitches[pitches["woba_denom"].notna() & pitches["n_thruorder_pitcher"].notna()]
+    if df.empty:
+        return pd.DataFrame()
+    rows = []
+    for pid, g in df.groupby("pitcher"):
+        early = g[g["n_thruorder_pitcher"] <= 2]
+        third = g[g["n_thruorder_pitcher"] >= 3]
+        e_den, t_den = early["woba_denom"].sum(), third["woba_denom"].sum()
+        if e_den < min_pa or t_den < min_pa // 2:
+            continue
+        e_woba = early["woba_value"].sum() / e_den
+        t_woba = third["woba_value"].sum() / t_den
+        rows.append({"pitcher_id": pid,
+                     "sp_tto_penalty": round(float(t_woba - e_woba), 3)})
+    return pd.DataFrame(rows)
+
+
+@_cache_ok
+def get_tto_table(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
+    return tto_penalties(_statcast_range(end_date_iso, lookback_days))
+
+
+@_cache_ok
+def _tto_by_id(end_date_iso: str):
+    t = get_tto_table(end_date_iso)
+    return t.set_index("pitcher_id") if not t.empty else None
+
+
+def lookup_tto(end_date_iso: str, pitcher_id) -> float | None:
+    idx = _tto_by_id(end_date_iso)
+    if idx is None or pitcher_id is None or pitcher_id not in idx.index:
+        return None
+    v = idx.loc[pitcher_id, "sp_tto_penalty"]
+    v = v.iloc[0] if hasattr(v, "iloc") else v
+    return float(v) if v == v else None
+
+
 @_cache_ok
 def get_velo_table(end_date_iso: str, lookback_days: int = 45) -> pd.DataFrame:
     # Wider window so a starter has multiple outings to baseline against.

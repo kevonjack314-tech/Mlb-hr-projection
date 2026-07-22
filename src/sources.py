@@ -480,6 +480,10 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
             if velo:
                 prof.update(velo)              # last-start velo vs baseline
                 used_real = True
+            tto = statcast.lookup_tto(end_date_iso, pitcher_id)
+            if tto is not None:
+                prof["sp_tto_penalty"] = tto   # 3rd-time-through wOBA lift
+                used_real = True
     except Exception:
         pass
     return prof, used_real
