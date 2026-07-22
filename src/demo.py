@@ -409,6 +409,17 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     hr15 = min(0.10, max(0.0, hr_per_pa * heat * rng.uniform(0.7, 1.35)))
     hr30 = min(0.095, max(0.0, hr_per_pa * (0.5 * heat + 0.5) * rng.uniform(0.8, 1.2)))
 
+    # Bat tracking (Statcast's newest data): swing speed (mph), squared-up rate,
+    # fast-swing rate — what a hitter is CAPABLE of. Drawn from an INDEPENDENT
+    # rng so the deterministic slate existing tests rely on is unchanged.
+    brng = random.Random(_seed_int(name, slate_seed, "battrack"))
+    bat_speed = round(max(64.0, min(80.0, {1: 69.0, 2: 70.5, 3: 72.0, 4: 74.0,
+                      5: 76.0}[tier] + brng.uniform(-1.5, 1.5))), 1)
+    squared_up_pct = round(max(18.0, min(38.0, 28.0 - (tier - 3) * 1.2
+                          + brng.uniform(-3.0, 3.0))), 1)
+    fast_swing_pct = round(max(5.0, min(85.0, {1: 15.0, 2: 25.0, 3: 38.0,
+                          4: 55.0, 5: 70.0}[tier] + brng.uniform(-8.0, 8.0))), 1)
+
     return {
         "barrel_pct": round(barrel, 1),
         "hard_hit_pct": round(hard_hit, 1),
@@ -432,6 +443,9 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "sweet_spot_pct": sweet_spot_pct,
         "brl_pa": brl_pa,
         "sprint_speed": sprint_speed,
+        "bat_speed": bat_speed,
+        "squared_up_pct": squared_up_pct,
+        "fast_swing_pct": fast_swing_pct,
         "vs_fb": vs_fb,
         "vs_br": vs_br,
         "vs_os": vs_os,
