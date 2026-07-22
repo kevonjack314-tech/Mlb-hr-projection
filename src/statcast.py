@@ -140,6 +140,58 @@ def _fg_api_leaders(year: int, stats: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+_BAT_TRACKING_URL = "https://baseballsavant.mlb.com/leaderboard/bat-tracking"
+
+
+@_cache_ok
+def get_bat_tracking_table(year: int, min_swings: int = 50) -> pd.DataFrame:
+    """Statcast bat-tracking leaderboard (Savant CSV), keyed by MLBAM id.
+
+    Columns: bat_speed (mph), squared_up_pct, fast_swing_pct. Empty on failure.
+    Bat speed is what a hitter is CAPABLE of on contact — a rising swing-speed
+    trend is a HR surge announcing itself before the results show. Most models
+    still run on exit-velo stats and miss this newer signal entirely.
+    """
+    try:
+        import io
+        import requests
+        r = requests.get(_BAT_TRACKING_URL, params={
+            "attempts": str(min_swings), "type": "batter", "min": str(min_swings),
+            "season": str(year), "csv": "true",
+        }, headers=_FG_HEADERS, timeout=30)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+    except Exception as exc:
+        note_diag("bat_tracking (Savant)", exc)
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    def _find(cands):
+        low = {c.lower().strip(): c for c in df.columns}
+        for cand in cands:
+            if cand in low:
+                return low[cand]
+        return None
+
+    id_col = _find(["id", "player_id", "batter"])
+    speed_col = _find(["avg_bat_speed", "bat_speed", "swing_speed"])
+    squared_col = _find(["squared_up_per_swing", "squared_up_per_bbe",
+                         "squared_up_rate", "squared_up"])
+    fast_col = _find(["fast_swing_rate", "fast_swing_per_swing", "fast_swing"])
+    if id_col is None or speed_col is None:
+        return pd.DataFrame()
+    out = pd.DataFrame({"mlbam_id": pd.to_numeric(df[id_col], errors="coerce")})
+    out["bat_speed"] = pd.to_numeric(df[speed_col], errors="coerce").round(1)
+    if squared_col:
+        out["squared_up_pct"] = (pd.to_numeric(df[squared_col], errors="coerce")
+                                 .map(_coerce_pct).round(1))
+    if fast_col:
+        out["fast_swing_pct"] = (pd.to_numeric(df[fast_col], errors="coerce")
+                                 .map(_coerce_pct).round(1))
+    return out.dropna(subset=["mlbam_id", "bat_speed"])
+
+
 def normalize_name(name: str) -> str:
     """Accent/punctuation-insensitive 'first last' key for cross-source joins."""
     if not name:
@@ -281,6 +333,16 @@ def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
         sp = sp.rename(columns={"player_id": "mlbam_id"})
         if "sprint_speed" in sp.columns:
             table = table.merge(sp[["mlbam_id", "sprint_speed"]], on="mlbam_id", how="left")
+    except Exception:
+        pass
+
+    # Merge Statcast BAT-TRACKING (bat speed, squared-up, fast-swing) by id.
+    # Newest Savant frontier — most models still run on exit velo alone. Exit
+    # velo says what happened; bat speed says what a hitter is CAPABLE of.
+    try:
+        bt = get_bat_tracking_table(year)
+        if not bt.empty:
+            table = table.merge(bt, on="mlbam_id", how="left")
     except Exception:
         pass
 
@@ -884,6 +946,8 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
         "xiso": g("xiso"), "xslg": g("xslg"), "iso": g("iso"),
         "sweet_spot_pct": g("sweet_spot_pct"),
         "brl_pa": g("brl_pa"), "sprint_speed": g("sprint_speed"),
+        "bat_speed": g("bat_speed"), "squared_up_pct": g("squared_up_pct"),
+        "fast_swing_pct": g("fast_swing_pct"),
         "pa": g("pa"), "season_hr": g("season_hr"),
         "hr_per_pa": g("hr_per_pa"), "power_tier": int(row.get("power_tier", 3)),
     }

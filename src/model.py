@@ -252,6 +252,15 @@ def _power_quality_score(row: pd.Series) -> dict:
         "avg_ev": scale(row.get("avg_ev"), *REF["avg_ev"]),
     }
     pq = sum(subs[k] * w for k, w in POWER_QUALITY_WEIGHTS.items())
+    # Bat speed supplement: exit velo says what HAPPENED; bat speed says what a
+    # hitter is CAPABLE of (Statcast bat-tracking, ~72 mph league avg). A small
+    # nudge so elite/rising swing speed lifts power quality without overriding
+    # the outcome-based core.
+    bs = row.get("bat_speed")
+    if bs is not None and bs == bs:
+        bs_score = scale(float(bs), 68.0, 78.0)          # ~0-100
+        pq = float(np.clip(0.90 * pq + 0.10 * bs_score, 0, 100))
+        subs["bat_speed"] = round(bs_score, 1)
     return {"power_quality_score": pq, "_pq_subs": subs}
 
 
@@ -538,6 +547,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     max_ev = _num(row.get("max_ev"))
     if max_ev is not None and out["max_ev_score"] >= 70:
         bits.append(f"big raw power ({max_ev} mph max EV)")
+    bs = _num(row.get("bat_speed"))
+    if bs is not None and bs >= 75.0:
+        bits.append(f"elite bat speed ({bs} mph)")
     fb = _num(row.get("fb_pct"))
     if fb is not None and out.get("fb_score", 0) >= 65:
         bits.append(f"fly-ball hitter ({fb}% FB)")

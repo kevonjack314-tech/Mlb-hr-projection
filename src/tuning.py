@@ -68,6 +68,8 @@ FEATURE_COLS = [
     "sp_hitter_count_fb",
     # start-time park effect (day/night)
     "daynight_mult",
+    # Statcast bat-tracking: swing speed & squared-up rate
+    "bat_speed", "squared_up_pct", "fast_swing_pct",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
