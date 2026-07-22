@@ -484,6 +484,10 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
             if tto is not None:
                 prof["sp_tto_penalty"] = tto   # 3rd-time-through wOBA lift
                 used_real = True
+            hcfb = statcast.lookup_hitter_count_fb(end_date_iso, pitcher_id)
+            if hcfb is not None:
+                prof["sp_hitter_count_fb"] = hcfb   # predictable-FB tendency
+                used_real = True
     except Exception:
         pass
     return prof, used_real

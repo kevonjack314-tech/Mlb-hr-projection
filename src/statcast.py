@@ -471,6 +471,55 @@ def velo_deltas(pitches: pd.DataFrame, min_fb: int = 15) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def hitter_count_fb(pitches: pd.DataFrame, min_pitches: int = 40) -> pd.DataFrame:
+    """Fastball rate in HITTER'S COUNTS per pitcher.
+
+    In clear hitter's counts (2-0, 3-1, 3-0, 2-1) some pitchers are "auto-
+    fastball" — the hitter knows what's coming and sits on it. Fastball% in
+    those counts, crossed with a batter's damage vs fastballs, is a mistake-
+    hunting signal almost no model builds. Pure function.
+
+    Returns per-pitcher: sp_hitter_count_fb (fastball % in hitter's counts).
+    """
+    need = {"pitcher", "balls", "strikes", "pitch_family"}
+    if pitches is None or pitches.empty or not need <= set(pitches.columns):
+        return pd.DataFrame()
+    b, s = pitches["balls"], pitches["strikes"]
+    hc = pitches[((b == 2) & (s == 0)) | ((b == 3) & (s == 1))
+                 | ((b == 3) & (s == 0)) | ((b == 2) & (s == 1))]
+    hc = hc[hc["pitch_family"].notna()]
+    if hc.empty:
+        return pd.DataFrame()
+    grp = hc.groupby("pitcher")["pitch_family"].agg(
+        n="size", fb=lambda x: int((x == "fb").sum()))
+    grp = grp[grp["n"] >= min_pitches]
+    if grp.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame({"sp_hitter_count_fb": (grp["fb"] / grp["n"] * 100.0).round(1)})
+    out.index.name = "pitcher_id"
+    return out.reset_index()
+
+
+@_cache_ok
+def get_hitter_count_fb_table(end_date_iso: str, lookback_days: int = 30) -> pd.DataFrame:
+    return hitter_count_fb(_statcast_range(end_date_iso, lookback_days))
+
+
+@_cache_ok
+def _hc_fb_by_id(end_date_iso: str):
+    t = get_hitter_count_fb_table(end_date_iso)
+    return t.set_index("pitcher_id") if not t.empty else None
+
+
+def lookup_hitter_count_fb(end_date_iso: str, pitcher_id) -> float | None:
+    idx = _hc_fb_by_id(end_date_iso)
+    if idx is None or pitcher_id is None or pitcher_id not in idx.index:
+        return None
+    v = idx.loc[pitcher_id, "sp_hitter_count_fb"]
+    v = v.iloc[0] if hasattr(v, "iloc") else v
+    return float(v) if v == v else None
+
+
 def tto_penalties(pitches: pd.DataFrame, min_pa: int = 30) -> pd.DataFrame:
     """Third-time-through-the-order penalty per pitcher.
 

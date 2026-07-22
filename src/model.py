@@ -296,6 +296,14 @@ def pitch_type_matchup(row: pd.Series) -> tuple[float, float]:
     woba = sum(m * v for m, v in zip(mix, vs)) / total
     score = scale(woba, *REF["vs_pitch_woba"])
     mult = float(np.clip(0.92 + (woba - 0.320) / 0.080 * 0.10, 0.90, 1.10))
+    # Predictability edge: an "auto-fastball" starter in hitter's counts (league
+    # ~55% FB there) lets a good fastball hitter sit dead-red. Reward the
+    # interaction of high FB% in hitter's counts x the batter's damage vs FB.
+    hc_fb, vs_fb = row.get("sp_hitter_count_fb"), row.get("vs_fb")
+    if hc_fb is not None and hc_fb == hc_fb and vs_fb is not None and vs_fb == vs_fb:
+        predictable = (float(hc_fb) - 55.0) / 100.0          # +/- ~0.15
+        fb_edge = (float(vs_fb) - 0.330) / 0.080             # batter vs FB
+        mult *= float(np.clip(1.0 + predictable * fb_edge * 0.9, 0.94, 1.10))
     return mult, score
 
 
@@ -555,6 +563,10 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     spot = _num(row.get("lineup_spot"))
     if tto is not None and tto >= 0.030 and spot is not None and spot <= 4:
         bits.append("top of order reaches a fade-prone starter's 3rd time through")
+    hc_fb = _num(row.get("sp_hitter_count_fb"))
+    vs_fb = _num(row.get("vs_fb"))
+    if (hc_fb is not None and hc_fb >= 62 and vs_fb is not None and vs_fb >= 0.360):
+        bits.append("can sit dead-red vs a predictable-fastball arm")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")
