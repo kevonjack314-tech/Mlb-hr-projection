@@ -64,6 +64,8 @@ FEATURE_COLS = [
     "sp_velo_delta", "sp_velo_last",
     # opposing starter's 3rd-time-through-the-order wOBA penalty
     "sp_tto_penalty",
+    # opposing starter's fastball rate in hitter's counts (predictability)
+    "sp_hitter_count_fb",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",

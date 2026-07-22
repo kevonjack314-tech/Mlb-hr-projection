@@ -468,6 +468,9 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
                         + rng.uniform(-0.010, 0.010), 3)
     gb_pct = {"GB": 52, "NEU": 44, "FB": 36}[lean] + rng.uniform(-3, 3)
     fb_pct = {"GB": 28, "NEU": 36, "FB": 44}[lean] + rng.uniform(-3, 3)
+    # Predictable-FB tendency in hitter's counts (league ~55%); auto-fastball
+    # arms sit higher and let good FB hitters cheat.
+    hitter_count_fb = round(rng.uniform(42.0, 72.0), 1)
     # Pitch mix (% fastball / breaking / offspeed), summing to exactly 100.
     pmix_fb = rng.randint(44, 64)
     pmix_br = min(rng.randint(20, 38), 95 - pmix_fb)
@@ -484,6 +487,7 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
         "sp_velo_last": round(velo_base + velo_delta, 1),
         "sp_velo_delta": velo_delta,
         "sp_tto_penalty": tto_penalty,
+        "sp_hitter_count_fb": hitter_count_fb,
         "pitcher_gb_pct": round(gb_pct, 1),
         "pitcher_fb_pct": round(fb_pct, 1),
         "pitcher_mix_fb": pmix_fb,
