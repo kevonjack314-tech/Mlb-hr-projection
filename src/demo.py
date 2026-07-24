@@ -557,6 +557,11 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
         is_night = (_seed_int(slate_seed, home, "daynight") % 100) < 65
         # Which game of the series (1-3); independent seed keeps the slate stable.
         series_game = (_seed_int(slate_seed, home, away, "series") % 3) + 1
+        # Hitter fatigue: consecutive games (3-14) and a day-after-night flag.
+        gir_home = (_seed_int(slate_seed, home, "gir") % 12) + 3
+        gir_away = (_seed_int(slate_seed, away, "gir") % 12) + 3
+        dan_home = (not is_night) and (_seed_int(slate_seed, home, "dan") % 100) < 40
+        dan_away = (not is_night) and (_seed_int(slate_seed, away, "dan") % 100) < 40
 
         for side, team, opp, opp_pitcher in (
             ("away", away, home, home_pitcher),
@@ -583,6 +588,8 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "humidity_pct": humidity,
                     "is_night": is_night,
                     "series_game": series_game,
+                    "bat_games_in_row": gir_home if side == "home" else gir_away,
+                    "day_after_night": dan_home if side == "home" else dan_away,
                 }
                 row.update(prof)
                 row.update(opp_pitcher)

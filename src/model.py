@@ -197,6 +197,15 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
 
     mult = float(blended * _platoon_multiplier(row))
 
+    # Hitter fatigue: bat speed/power sag on long stretches without an off day
+    # and on a day game right after a night game (short turnaround). Small
+    # penalty — the complement to pitcher velo decline.
+    gir = row.get("bat_games_in_row")
+    if gir is not None and gir == gir and float(gir) >= 8:
+        mult *= float(np.clip(1.0 - (float(gir) - 7.0) * 0.008, 0.95, 1.0))
+    if bool(row.get("day_after_night")):
+        mult *= 0.985
+
     # Series familiarity: hitters see the SAME staff (starter + pen) on
     # consecutive days and measurably improve within a series as they re-see
     # arms and pitch shapes. Game 1 neutral; game 3+ a small edge.
@@ -619,6 +628,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     sg = _num(row.get("series_game"))
     if sg is not None and sg >= 3:
         bits.append(f"3rd+ game of the series — familiar with the staff")
+    gir = _num(row.get("bat_games_in_row"))
+    if gir is not None and gir >= 10:
+        bits.append(f"{int(gir)} games in a row — fatigue risk")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")

@@ -66,6 +66,53 @@ def _game_is_night(game_datetime_iso, park) -> bool | None:
         return None
 
 
+@lru_cache(maxsize=16)
+def team_fatigue_table(end_date_iso: str, lookback: int = 12) -> tuple:
+    """Per-team schedule fatigue ending on the game date.
+
+    Bat speed and power sag with accumulated fatigue — consecutive games with
+    no off day, and a day game right after a night game (short turnaround).
+    Both are schedule-derived; a real, under-modeled hitter-side fatigue signal
+    (the complement to pitcher velo decline). Returns a hashable tuple of
+    (team_abbr, games_in_row, day_after_night) so it stays lru_cacheable.
+    """
+    end = dt.date.fromisoformat(end_date_iso)
+    start = end - dt.timedelta(days=lookback)
+    data = _get_json(SCHEDULE_URL, {"sportId": 1, "startDate": start.isoformat(),
+                                    "endDate": end.isoformat(), "hydrate": "team"})
+    if not data or not data.get("dates"):
+        return ()
+    # team -> {date: is_night}
+    played: dict = {}
+    for d in data.get("dates", []):
+        dstr = d.get("date")
+        try:
+            gd = dt.date.fromisoformat(dstr)
+        except Exception:
+            continue
+        for g in d.get("games", []):
+            night = str(g.get("dayNight", "")).lower() == "night"
+            for side in ("home", "away"):
+                t = g["teams"][side]["team"]
+                abbr = _TEAM_ID_TO_ABBR.get(t.get("id"))
+                if abbr:
+                    played.setdefault(abbr, {})[gd] = night
+    out = []
+    for abbr, days in played.items():
+        if end not in days:
+            continue
+        # Consecutive game days ending at `end` (no off day between).
+        n, cur = 0, end
+        while cur in days:
+            n += 1
+            cur -= dt.timedelta(days=1)
+        # Day-after-night: today is a day game, yesterday was a night game.
+        yday = end - dt.timedelta(days=1)
+        dan = (days.get(end) is False) and (days.get(yday) is True)
+        out.append((abbr, n, bool(dan)))
+    return tuple(out)
+
+
 @lru_cache(maxsize=64)
 def fetch_schedule(date_iso: str) -> tuple:
     """Return a tuple of game dicts for the date, or () on failure.
@@ -538,6 +585,11 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
         typ_spots = typical_spots()
     except Exception:
         typ_spots, _norm = {}, (lambda s: s)
+    try:
+        fatigue = {abbr: (gir, dan) for abbr, gir, dan
+                   in team_fatigue_table(date_iso)}
+    except Exception:
+        fatigue = {}
     rows = []
     for g in games:
         home, away = g["home"], g["away"]
@@ -596,6 +648,9 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                     "bullpen_hr9": bullpen_hr9.get(opp),
                     "is_night": is_night,   # start-time park effect
                     "series_game": g.get("series_game"),   # familiarity within series
+                    # Hitter fatigue: consecutive games, day-after-night.
+                    "bat_games_in_row": fatigue.get(team, (None, None))[0],
+                    "day_after_night": fatigue.get(team, (None, None))[1],
                 }
                 row.update(weather)
                 row.update(metrics)
