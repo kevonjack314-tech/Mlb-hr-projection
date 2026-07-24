@@ -137,6 +137,7 @@ _PROFILE_METRIC_COLS = [
     "whiff_pct", "chase_pct", "zone_contact_pct", "fb_pct", "gb_pct", "ld_pct",
     "pull_pct", "hr_fb", "xiso", "xslg", "sprint_speed", "xwoba", "hr_per_pa",
     "bat_speed", "squared_up_pct", "fast_swing_pct",
+    "barrel_pct_14", "xwoba_14", "barrel_trend", "xwoba_trend",
 ]
 
 

@@ -52,7 +52,9 @@ def test_pick_record_on_real_log():
     assert h["wins"] + h["losses"] == h["days"]
     assert 0 <= h["hit_rate"] <= 100
     t = rec["top5"]
-    assert t is not None and t["picks"] == t["days"] * 5
+    # ~5 picks/day, but a short-slate day (few games) can log fewer than 5.
+    assert t is not None
+    assert t["days"] * 4 <= t["picks"] <= t["days"] * 5
     assert set(rec["roles"]) == {"Anchor", "Value", "Longshot"}
 
 

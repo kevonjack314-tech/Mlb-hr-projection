@@ -351,6 +351,19 @@ def score_row(row: pd.Series) -> dict:
     season_hr_score = scale(row.get("hr_per_pa"), *REF["hr_per_pa"])
     recent_rate = _recent_form_rate(row)
     recent_form_score = scale(recent_rate, *REF["recent_hr_rate"])
+    # Contact-quality trend: hr_rate_7 is noisy; a rising 14d barrel% / xwOBA
+    # is a stabler "heating up" signal. Nudge the form score by the trend
+    # (barrel-pct points + xwOBA*100), clamped so it augments, not dominates.
+    bt = row.get("barrel_trend")
+    xt = row.get("xwoba_trend")
+    trend_pts = 0.0
+    if bt is not None and bt == bt:
+        trend_pts += float(bt) * 1.4
+    if xt is not None and xt == xt:
+        trend_pts += float(xt) * 120.0
+    if trend_pts:
+        recent_form_score = float(np.clip(
+            recent_form_score + float(np.clip(trend_pts, -12.0, 12.0)), 0, 100))
     k_score = scale(row.get("k_pct"), *REF["k_pct"])  # high = strikeout-prone
     # Swing-and-miss (whiff) rate: high = more boom-or-bust, lower contact floor.
     # Fall back to the K% signal when whiff isn't available.
@@ -566,6 +579,9 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
         bits.append(f"fly-ball hitter ({fb}% FB)")
     if _num(row.get("hr_rate_7")) is not None and out["recent_form_score"] >= 65:
         bits.append("hot recent form")
+    bt = _num(row.get("barrel_trend"))
+    if bt is not None and bt >= 3.0:
+        bits.append(f"contact quality trending up (+{bt} barrel% last 14d)")
     if out["park_factor"] >= 106:
         bits.append(f"HR-friendly park ({int(out['park_factor'])} factor)")
     elif out["park_factor"] <= 94:

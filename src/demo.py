@@ -408,6 +408,14 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
     hr7 = min(0.11, max(0.0, hr_per_pa * heat * rng.uniform(0.6, 1.5)))
     hr15 = min(0.10, max(0.0, hr_per_pa * heat * rng.uniform(0.7, 1.35)))
     hr30 = min(0.095, max(0.0, hr_per_pa * (0.5 * heat + 0.5) * rng.uniform(0.8, 1.2)))
+    # Rolling 14d contact-quality trend, correlated with the same heat factor so
+    # hot bats show a positive barrel/xwOBA trend (independent seed for stability).
+    trng = random.Random(_seed_int(name, slate_seed, "cqtrend"))
+    barrel_pct_14 = round(max(0.0, barrel + (heat - 1.0) * 6.0 + trng.uniform(-2.0, 2.0)), 1)
+    barrel_trend = round(barrel_pct_14 - barrel, 1)
+    xwoba_14 = round(max(0.220, min(0.460, xwoba + (heat - 1.0) * 0.05
+                     + trng.uniform(-0.02, 0.02))), 3)
+    xwoba_trend = round(xwoba_14 - xwoba, 3)
 
     # Bat tracking (Statcast's newest data): swing speed (mph), squared-up rate,
     # fast-swing rate — what a hitter is CAPABLE of. Drawn from an INDEPENDENT
@@ -455,6 +463,10 @@ def _hitter_profile(name: str, bats: str, tier: int, slate_seed: str) -> dict:
         "hr_rate_7": round(hr7, 4),
         "hr_rate_15": round(hr15, 4),
         "hr_rate_30": round(hr30, 4),
+        "barrel_pct_14": barrel_pct_14,
+        "xwoba_14": xwoba_14,
+        "barrel_trend": barrel_trend,
+        "xwoba_trend": xwoba_trend,
         "power_tier": tier,
     }
 
