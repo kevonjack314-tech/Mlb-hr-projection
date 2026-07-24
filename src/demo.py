@@ -562,6 +562,7 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
         gir_away = (_seed_int(slate_seed, away, "gir") % 12) + 3
         dan_home = (not is_night) and (_seed_int(slate_seed, home, "dan") % 100) < 40
         dan_away = (not is_night) and (_seed_int(slate_seed, away, "dan") % 100) < 40
+        # Batter-vs-pitcher career history is synthesized per hitter below.
 
         for side, team, opp, opp_pitcher in (
             ("away", away, home, home_pitcher),
@@ -570,6 +571,11 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
             team_info = TEAMS[team]
             for idx, (name, bats, tier, pos) in enumerate(team_info["hitters"]):
                 prof = _hitter_profile(name, bats, tier, slate_seed)
+                # BvP career history vs this opposing starter (mostly none;
+                # occasional multi-HR "owns him" history). Independent seed.
+                bseed = _seed_int(name, opp_pitcher.get("pitcher_name", ""), "bvp")
+                bvp_pa = bseed % 26            # 0-25 career PA
+                bvp_hr = (bseed // 100) % 4 if bvp_pa >= 5 else 0   # 0-3 HR
                 row = {
                     "player": name,
                     "team": team,
@@ -590,6 +596,8 @@ def build_demo_slate(game_date: date) -> pd.DataFrame:
                     "series_game": series_game,
                     "bat_games_in_row": gir_home if side == "home" else gir_away,
                     "day_after_night": dan_home if side == "home" else dan_away,
+                    "bvp_pa": bvp_pa,
+                    "bvp_hr": bvp_hr,
                 }
                 row.update(prof)
                 row.update(opp_pitcher)

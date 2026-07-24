@@ -224,6 +224,7 @@ GLOSSARY = {
     "SP Velo Δ": "The opposing starter's average fastball velocity in his MOST RECENT start minus his season-window baseline (mph). Down 1+ mph is the best public early-warning of fatigue/injury — HR rates spike against diminished velo before ERA catches up, and books adjust slowly. Negative = losing giddy-up (a HR spot); positive = fresh/ramping.",
     "SP 3rd-Time Δ": "How much MORE the opposing starter gets hit the 3rd time through the order — his wOBA-allowed on the 3rd+ pass minus his 1st/2nd (Statcast n_thruorder_pitcher). Positive = he fades. Only top-of-order bats (spots 1-4) reliably reach that 3rd look before the bullpen, so this boosts THEM, not the bottom of the order.",
     "SP Auto-FB%": "The opposing starter's fastball rate in HITTER'S COUNTS (2-0, 3-1, 3-0, 2-1) — league average ~55%. A high number means he's predictable when behind, letting a hitter who mashes fastballs sit dead-red. The model rewards the interaction of this × the batter's damage vs fastballs.",
+    "HRs vs SP": "How many home runs THIS hitter has hit off today's starting pitcher over their careers (real, Statcast, ~4 seasons back), with career PA vs him in the tooltip. The classic 'he owns this guy' history — small-sample, so it's a gentle boost, but books watch it.",
     "SP HRs@Spot": "HRs the opposing starting pitcher has allowed to THIS hitter's lineup spot over their last 10 games — a juicy-spot matchup signal that also boosts the bat in parlay selection.",
     "HRs@Spot": "HRs this hitter has hit from today's lineup spot in the recurring HR-by-spot log (data before the selected date).",
     "HR/G@Spot": "HR per game this hitter has produced from today's lineup spot (recurring log) — a parlay role-fit nudge.",
@@ -411,6 +412,7 @@ DISPLAY_COLUMNS = {
     "vs_os": "vs OS",
     "hr_per_pa": "HR/PA",
     "expected_pa": "xPA",
+    "bvp_hr": "HRs vs SP",
     "sp_meatball_pct": "SP Meatball%",
     "sp_velo_delta": "SP Velo Δ",
     "sp_tto_penalty": "SP 3rd-Time Δ",
@@ -440,7 +442,7 @@ ESSENTIAL_KEYS = {
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
-    "barrel_pct", "max_ev", "park_factor", "role", "sp_hr_at_spot",
+    "barrel_pct", "max_ev", "park_factor", "role", "sp_hr_at_spot", "bvp_hr",
     "rationale", "sneaky_reasons",
 }
 
@@ -519,6 +521,7 @@ COLUMN_CONFIG = {
     "Games in Row": st.column_config.NumberColumn("Games in Row", help=GLOSSARY["Games in Row"], format="%d"),
     "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
     "xPA": st.column_config.NumberColumn("xPA", help=GLOSSARY["xPA"], format="%.1f"),
+    "HRs vs SP": st.column_config.NumberColumn("HRs vs SP", help=GLOSSARY["HRs vs SP"], format="%d"),
     "SP Meatball%": st.column_config.NumberColumn("SP Meatball%", help=GLOSSARY["SP Meatball%"], format="%.1f"),
     "SP Velo Δ": st.column_config.NumberColumn("SP Velo Δ", help=GLOSSARY["SP Velo Δ"], format="%+.1f"),
     "SP 3rd-Time Δ": st.column_config.NumberColumn("SP 3rd-Time Δ", help=GLOSSARY["SP 3rd-Time Δ"], format="%+.3f"),
@@ -648,11 +651,14 @@ def _team_pick_line(rank: str, row: pd.Series) -> None:
     spot = row.get("lineup_spot")
     spot_txt = f" · bats {int(spot)}" if pd.notna(spot) else ""
     odds = format_american(row.get("book_odds"))
+    bvp = row.get("bvp_hr")
+    bvp_txt = (f" · 🎯 {int(bvp)} career HR vs SP"
+               if pd.notna(bvp) and bvp and bvp >= 1 else "")
     st.markdown(f"**{rank} {row['player']}** — {row['hr_prob_game']*100:.0f}% · {odds}"
                 f"  \n<span style='opacity:0.75;font-size:0.85em'>"
                 f"{row.get('player_tier','')}{spot_txt} · HR Score {row.get('hr_score',0):.0f} · "
                 f"Barrel% {_fmt(row.get('barrel_pct'))} · HR/FB {_fmt(row.get('hr_fb'))} · "
-                f"Max EV {_fmt(row.get('max_ev'))} · ULX {row.get('ulx_grade','—')}</span>",
+                f"Max EV {_fmt(row.get('max_ev'))} · ULX {row.get('ulx_grade','—')}{bvp_txt}</span>",
                 unsafe_allow_html=True)
     if row.get("rationale"):
         st.caption(f"💡 {row['rationale']}")

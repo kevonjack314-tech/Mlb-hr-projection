@@ -206,6 +206,15 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
     if bool(row.get("day_after_night")):
         mult *= 0.985
 
+    # Batter-vs-pitcher history: has this hitter taken THIS pitcher deep before?
+    # Small-sample, so a gentle capped bonus — books watch it; the learned model
+    # measures its true weight from the eval log.
+    bvp_hr = row.get("bvp_hr")
+    bvp_pa = row.get("bvp_pa")
+    if (bvp_hr is not None and bvp_hr == bvp_hr and bvp_hr > 0
+            and bvp_pa is not None and bvp_pa == bvp_pa and bvp_pa >= 5):
+        mult *= float(min(1.10, 1.0 + float(bvp_hr) * 0.02))
+
     # Series familiarity: hitters see the SAME staff (starter + pen) on
     # consecutive days and measurably improve within a series as they re-see
     # arms and pitch shapes. Game 1 neutral; game 3+ a small edge.
@@ -631,6 +640,11 @@ def _build_rationale(row: pd.Series, out: dict) -> str:
     gir = _num(row.get("bat_games_in_row"))
     if gir is not None and gir >= 10:
         bits.append(f"{int(gir)} games in a row — fatigue risk")
+    bvp_hr = _num(row.get("bvp_hr"))
+    bvp_pa = _num(row.get("bvp_pa"))
+    if bvp_hr is not None and bvp_hr >= 1 and bvp_pa is not None and bvp_pa >= 5:
+        pa_txt = f" in {int(bvp_pa)} career PA" if bvp_pa else ""
+        bits.append(f"owns this pitcher ({int(bvp_hr)} career HR{pa_txt})")
     if not bits:
         bits.append("balanced profile" if barrel is not None
                     else "metrics unavailable for this bat")
