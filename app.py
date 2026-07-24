@@ -1052,6 +1052,52 @@ def tab_pick_record():
         st.caption("These same numbers feed the parlay builder's per-role "
                    "reliability factors — roles that over-deliver get leaned into.")
 
+    _render_feature_importance()
+
+
+def _render_feature_importance():
+    """Show which signals the LEARNED model actually weights — the black box,
+    opened. Coefficients are on standardized features so they're comparable."""
+    from src.tuning import feature_importance
+    fi = feature_importance(top_n=20)
+    st.markdown("#### 🧠 What the learned model actually weights")
+    if fi is None:
+        st.info("The learned feature model hasn't trained yet — it needs ~2,000 "
+                "graded hitter-days with the full feature vector. Until then the "
+                "hand-tuned weights drive the model. Check back as the record grows.")
+        return
+    status = ("🟢 ACTIVE — beating the hand-tuned model on held-out days"
+              if fi["active"] else
+              "🟡 training — not yet beating the hand-tuned model on holdout")
+    bm, bb = fi.get("val_brier_model"), fi.get("val_brier_baseline")
+    st.caption(
+        f"{status}. Trained on **{fi['n']:,}** graded hitter-days"
+        + (f" · holdout Brier **{bm}** vs hand-tuned **{bb}**"
+           if bm is not None else "")
+        + ". These are the model's LEARNED weights on real HR outcomes — the "
+        "bigger the bar, the more that signal moves the model's HR probability."
+    )
+    imp = pd.DataFrame(fi["rows"])
+    show = imp.rename(columns={"label": "Signal", "importance_pct": "Importance %",
+                               "direction": "Direction", "weight": "Weight"})
+    st.dataframe(
+        show[["Signal", "Importance %", "Direction", "Weight"]],
+        hide_index=True, use_container_width=True,
+        height=min(560, 60 + 34 * len(show)),
+        column_config={
+            "Importance %": st.column_config.ProgressColumn(
+                "Importance %", help="Share of the model's total weight this "
+                "signal carries (|standardized coefficient|).",
+                min_value=0.0, max_value=float(imp["importance_pct"].max() or 1),
+                format="%.1f"),
+            "Weight": st.column_config.NumberColumn(
+                "Weight", help="Signed learned coefficient — positive raises the "
+                "HR probability, negative lowers it.", format="%+.3f"),
+        },
+    )
+    st.caption("👆 This is the model grading its OWN inputs from real outcomes. "
+               "Signals that don't earn their keep drift toward zero over time.")
+
 
 def tab_previous_hrs(history):
     (events, _summary, _centroid, _calib, _trend, league_spot, _curve, report,
