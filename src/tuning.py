@@ -378,6 +378,66 @@ def apply_feature_model(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Human-readable labels for the learned feature weights (feature-importance UI).
+FEATURE_LABELS = {
+    "barrel_pct": "Barrel%", "brl_pa": "Barrel/PA%", "hard_hit_pct": "Hard-Hit%",
+    "avg_ev": "Avg exit velo", "max_ev": "Max exit velo", "launch_angle": "Launch angle",
+    "fb_pct": "Fly-ball%", "gb_pct": "Ground-ball%", "ld_pct": "Line-drive%",
+    "pull_pct": "Pull%", "hr_fb": "HR/FB", "whiff_pct": "Whiff%", "chase_pct": "Chase%",
+    "zone_contact_pct": "Zone-contact%", "k_pct": "Strikeout%",
+    "xiso": "xISO", "xslg": "xSLG", "xwoba": "xwOBA", "iso": "ISO",
+    "sweet_spot_pct": "Sweet-spot%", "hr_per_pa": "Season HR/PA", "season_hr": "Season HR",
+    "pa": "Plate appearances", "hr_rate_7": "HR rate (7d)", "hr_rate_15": "HR rate (15d)",
+    "hr_rate_30": "HR rate (30d)", "recent_form_score": "Recent-form score",
+    "barrel_pct_14": "Barrel% (14d)", "xwoba_14": "xwOBA (14d)",
+    "barrel_trend": "Barrel trend (14d)", "xwoba_trend": "xwOBA trend (14d)",
+    "platoon_adv": "Platoon edge", "pitch_matchup_score": "Pitch-arsenal matchup",
+    "matchup_score": "Pitcher matchup", "env_score": "Park/weather environment",
+    "pitcher_hr9": "Starter HR/9", "park_factor": "Park factor", "wind_mult": "Wind",
+    "temp_f": "Temperature", "expected_pa": "Expected PAs",
+    "woba_vs_l": "wOBA vs LHP", "woba_vs_r": "wOBA vs RHP", "woba_vs_hand": "wOBA vs today's hand",
+    "bullpen_hr9": "Opposing bullpen HR/9", "park_fit_mult": "Park fence fit (pull side)",
+    "park_porch_ft": "Pull-side fence distance", "sp_meatball_pct": "Starter meatball rate",
+    "sp_velo_delta": "Starter velo trend", "sp_velo_last": "Starter last-start velo",
+    "sp_tto_penalty": "Starter 3rd-time-through penalty",
+    "sp_hitter_count_fb": "Starter auto-fastball tendency", "daynight_mult": "Day/night park effect",
+    "bat_speed": "Bat speed", "squared_up_pct": "Squared-up%", "fast_swing_pct": "Fast-swing%",
+    "series_game": "Series game number", "bat_games_in_row": "Games in a row (fatigue)",
+    "day_after_night": "Day-after-night",
+}
+
+
+def feature_importance(top_n: int = 20) -> dict | None:
+    """Ranked learned-model weights, so you can SEE what the model actually
+    values. Coefficients are on standardized features, so |coef| is directly
+    comparable importance and the sign is the direction (positive raises HR
+    probability). Returns None until the learned model has trained."""
+    fm = _load_tuning().get("feature_model") or {}
+    feats, coef = fm.get("features"), fm.get("coef")
+    if not feats or not coef or len(feats) != len(coef):
+        return None
+    total = sum(abs(float(c)) for c in coef) or 1.0
+    rows = []
+    for f, c in zip(feats, coef):
+        c = float(c)
+        rows.append({
+            "feature": f,
+            "label": FEATURE_LABELS.get(f, f),
+            "weight": round(c, 4),
+            "importance_pct": round(100.0 * abs(c) / total, 1),
+            "direction": "↑ raises HR%" if c > 0 else ("↓ lowers HR%" if c < 0 else "—"),
+        })
+    rows.sort(key=lambda r: abs(r["weight"]), reverse=True)
+    return {
+        "active": bool(fm.get("active")),
+        "n": int(fm.get("n", 0)),
+        "val_days": int(fm.get("val_days", 0)),
+        "val_brier_model": fm.get("val_brier_model"),
+        "val_brier_baseline": fm.get("val_brier_baseline"),
+        "rows": rows[:top_n],
+    }
+
+
 def role_prob_factor(role: str) -> float:
     """Reliability multiplier for a parlay leg's probability, learned from the
     real track record of legs the builder picked in that role. 1.0 = neutral."""
