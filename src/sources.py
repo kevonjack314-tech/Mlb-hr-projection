@@ -655,6 +655,16 @@ def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]
                 row.update(weather)
                 row.update(metrics)
                 row.update(opp_pitcher)
+                # Batter-vs-pitcher career HR/PA history ("owns this guy").
+                try:
+                    from . import statcast as _sc3
+                    bvp = _sc3.lookup_bvp(opp_pitcher.get("pitcher_id"),
+                                          pid, date_iso)
+                    if bvp:
+                        row["bvp_hr"] = bvp["bvp_hr"]
+                        row["bvp_pa"] = bvp["bvp_pa"]
+                except Exception:
+                    pass
                 rows.append(row)
 
     if not rows:

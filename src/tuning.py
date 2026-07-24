@@ -76,6 +76,8 @@ FEATURE_COLS = [
     "series_game",
     # hitter fatigue (schedule-derived)
     "bat_games_in_row", "day_after_night",
+    # batter-vs-pitcher career history
+    "bvp_hr", "bvp_pa",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
@@ -404,6 +406,7 @@ FEATURE_LABELS = {
     "bat_speed": "Bat speed", "squared_up_pct": "Squared-up%", "fast_swing_pct": "Fast-swing%",
     "series_game": "Series game number", "bat_games_in_row": "Games in a row (fatigue)",
     "day_after_night": "Day-after-night",
+    "bvp_hr": "Career HRs vs this pitcher", "bvp_pa": "Career PA vs this pitcher",
 }
 
 

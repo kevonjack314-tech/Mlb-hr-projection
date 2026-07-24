@@ -497,6 +497,64 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     return table.reset_index()
 
 
+def bvp_counts(pitches: pd.DataFrame) -> pd.DataFrame:
+    """Batter-vs-pitcher career HR & PA totals from a pitcher's pitch history.
+
+    The classic "he owns this guy" signal — how many times a hitter has taken
+    THIS pitcher deep across their careers. Small-sample and books watch it.
+    A plate appearance ends on a row with a non-null `events`; a HR is
+    events == 'home_run'. Pure function so it's unit-testable offline.
+
+    Returns per batter: bvp_pa, bvp_hr.
+    """
+    need = {"batter", "events"}
+    if pitches is None or pitches.empty or not need <= set(pitches.columns):
+        return pd.DataFrame()
+    pa_rows = pitches[pitches["events"].notna()]
+    if pa_rows.empty:
+        return pd.DataFrame()
+    grp = pa_rows.groupby("batter")
+    out = pd.DataFrame({
+        "bvp_pa": grp.size(),
+        "bvp_hr": pa_rows.assign(_hr=(pa_rows["events"] == "home_run"))
+                         .groupby("batter")["_hr"].sum().astype(int),
+    })
+    out.index.name = "mlbam_id"
+    return out.reset_index()
+
+
+@_cache_ok
+def get_pitcher_bvp_table(pitcher_id, end_date_iso: str, seasons_back: int = 4) -> pd.DataFrame:
+    """Career BvP HR/PA per batter vs a starter (Statcast, ~4 seasons back)."""
+    if not _HAS_PYB or pitcher_id is None:
+        return pd.DataFrame()
+    try:
+        end = dt.date.fromisoformat(end_date_iso)
+        start = end.replace(year=end.year - seasons_back)
+        sc = pyb.statcast_pitcher(start.isoformat(), end.isoformat(), int(pitcher_id))
+    except Exception as exc:
+        note_diag("bvp (Statcast pitcher history)", exc)
+        return pd.DataFrame()
+    return bvp_counts(sc)
+
+
+@_cache_ok
+def _bvp_by_batter(pitcher_id, end_date_iso: str):
+    t = get_pitcher_bvp_table(pitcher_id, end_date_iso)
+    return t.set_index("mlbam_id") if not t.empty else None
+
+
+def lookup_bvp(pitcher_id, batter_id, end_date_iso: str) -> dict | None:
+    """{bvp_pa, bvp_hr} for this batter vs this pitcher, or None."""
+    idx = _bvp_by_batter(pitcher_id, end_date_iso)
+    if idx is None or batter_id is None or batter_id not in idx.index:
+        return None
+    row = idx.loc[batter_id]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    return {"bvp_pa": int(row["bvp_pa"]), "bvp_hr": int(row["bvp_hr"])}
+
+
 def meatball_rates(pitches: pd.DataFrame, min_pitches: int = 100) -> pd.DataFrame:
     """Middle-middle pitches per 100 ("meatballs") per pitcher.
 
