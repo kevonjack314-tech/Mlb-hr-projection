@@ -74,6 +74,8 @@ FEATURE_COLS = [
     "bat_speed", "squared_up_pct", "fast_swing_pct",
     # within-series familiarity (game number of the series)
     "series_game",
+    # hitter fatigue (schedule-derived)
+    "bat_games_in_row", "day_after_night",
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
