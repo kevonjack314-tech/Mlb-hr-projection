@@ -457,6 +457,42 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
     table = table.fillna(0.0)
+
+    # Rolling CONTACT-QUALITY trend (last 14d): barrel% and xwOBA on batted
+    # balls. HR-rate over a week is noisy — one lucky game swings it — but
+    # contact quality stabilizes fast, so a rising 14d barrel/xwOBA is a much
+    # cleaner "the process is heating up" signal than hr_rate_7.
+    try:
+        bbe = sc[sc.get("type", "X").eq("X")] if "type" in sc.columns else sc
+        bbe = bbe[bbe["launch_speed"].notna()] if "launch_speed" in bbe.columns else bbe
+        if not bbe.empty and "barrel" in bbe.columns:
+            cutoff14 = end - dt.timedelta(days=14)
+            recent = bbe[bbe["game_date"] > cutoff14]
+            xw_col = ("estimated_woba_using_speedangle"
+                      if "estimated_woba_using_speedangle" in bbe.columns else None)
+            r = recent.groupby("batter")
+            rt = pd.DataFrame({
+                "barrel_pct_14": (r["barrel"].mean() * 100.0).round(1),
+                "xwoba_14": (r[xw_col].mean().round(3) if xw_col else np.nan),
+                "bbe_14": r.size(),
+            })
+            s = bbe.groupby("batter")
+            base = pd.DataFrame({
+                "barrel_pct_base": (s["barrel"].mean() * 100.0).round(1),
+                "xwoba_base": (s[xw_col].mean().round(3) if xw_col else np.nan),
+            })
+            trend = rt.join(base, how="left")
+            # Only trust the recent window with enough batted balls.
+            trend = trend[trend["bbe_14"] >= 10]
+            trend["barrel_trend"] = (trend["barrel_pct_14"]
+                                     - trend["barrel_pct_base"]).round(1)
+            trend["xwoba_trend"] = (trend["xwoba_14"] - trend["xwoba_base"]).round(3)
+            table = table.join(
+                trend[["barrel_pct_14", "xwoba_14", "barrel_trend", "xwoba_trend"]],
+                how="outer")
+    except Exception:
+        pass
+
     table.index.name = "mlbam_id"
     return table.reset_index()
 
@@ -963,11 +999,16 @@ def lookup_recent_form(end_date_iso: str, mlbam_id: int | None) -> dict | None:
     row = by_id.loc[mlbam_id]
     if isinstance(row, pd.DataFrame):
         row = row.iloc[0]
-    return {
+    out = {
         "hr_rate_7": float(row.get("hr_rate_7", 0.0)),
         "hr_rate_15": float(row.get("hr_rate_15", 0.0)),
         "hr_rate_30": float(row.get("hr_rate_30", 0.0)),
     }
+    for k in ("barrel_pct_14", "xwoba_14", "barrel_trend", "xwoba_trend"):
+        v = row.get(k)
+        if v is not None and v == v:      # non-null, non-NaN
+            out[k] = float(v)
+    return out
 
 
 def is_available() -> bool:

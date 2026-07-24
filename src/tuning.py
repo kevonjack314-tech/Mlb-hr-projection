@@ -51,6 +51,8 @@ FEATURE_COLS = [
     "hr_per_pa", "season_hr", "pa",
     # recent form
     "hr_rate_7", "hr_rate_15", "hr_rate_30", "recent_form_score",
+    # rolling contact-quality trend (last 14d vs season)
+    "barrel_pct_14", "xwoba_14", "barrel_trend", "xwoba_trend",
     # matchup & environment
     "platoon_adv", "pitch_matchup_score", "matchup_score", "env_score",
     "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
