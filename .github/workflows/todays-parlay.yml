@@ -1,0 +1,43 @@
+name: Today's parlay
+
+# On-demand: runs the FULL live model (live lineups, Statcast/FanGraphs metrics,
+# every signal, live odds if ODDS_API_KEY is set) and prints today's HR of the
+# Day plus 3-leg parlays to the job log. Runners have open network, so this
+# produces REAL picks — sandboxes without egress cannot.
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Slate date (YYYY-MM-DD), defaults to today (UTC)"
+        required: false
+      legs:
+        description: "Number of parlay legs"
+        required: false
+        default: "3"
+
+jobs:
+  parlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build today's parlay
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          DATE="${{ github.event.inputs.date || '' }}"
+          LEGS="${{ github.event.inputs.legs || '3' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u +%F)"; fi
+          python scripts/todays_parlay.py "$DATE" "$LEGS"
