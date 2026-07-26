@@ -20,11 +20,13 @@ def test_two_picks_per_team_every_game():
     pick_gt = set(map(tuple, picks[["game", "team"]].drop_duplicates().values))
     assert all_gt == pick_gt
 
-    # Each team's picks really are its two best by HR probability.
+    # Each team's picks really are its two best by HR probability. Compare the
+    # PROBABILITIES, not player identity: exact ties happen on a real board and
+    # either tied bat is an equally correct pick.
     for (game, team), grp in df.groupby(["game", "team"]):
-        best2 = set(grp.sort_values("hr_prob_game", ascending=False)
-                    .head(2)["player"])
-        got = set(picks[(picks["game"] == game) & (picks["team"] == team)]["player"])
+        best2 = sorted(grp["hr_prob_game"].nlargest(2).tolist(), reverse=True)
+        got = sorted(picks[(picks["game"] == game) & (picks["team"] == team)]
+                     ["hr_prob_game"].tolist(), reverse=True)
         assert got == best2
 
 

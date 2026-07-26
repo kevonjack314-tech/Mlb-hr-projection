@@ -36,6 +36,36 @@ MIN_ROWS_TO_APPLY = 300     # ~2 live slates before any adjustment kicks in
 FULL_TRUST_ROWS = 3000      # damping reaches full weight around here
 N_BINS = 8
 
+# --- Probability shaping -------------------------------------------------- #
+# A HARD clip at 0.35 made every elite bat print the SAME 35.0%, destroying the
+# ordering exactly where picks are made. The graded record says those capped
+# bats actually homer far MORE often than the cap allowed, so the ceiling was
+# both too low and too blunt. We now saturate smoothly toward a higher ceiling.
+P_GAME_CEIL = 0.60          # absolute ceiling (approached, never reached)
+P_GAME_KNEE = 0.28          # below this: no compression at all (identity)
+P_GAME_FLOOR = 0.002
+# How far the learned calibration curve may move a raw probability. The record
+# showed the old +/-40% band was itself a binding constraint at both ends
+# (the top needed ~1.5-1.7x, the bottom far less than 0.6x).
+CAL_MIN_MULT = 0.45
+CAL_MAX_MULT = 1.75
+
+
+def soft_cap(p, ceiling: float = P_GAME_CEIL, knee: float = P_GAME_KNEE):
+    """Smoothly saturate a probability toward `ceiling` instead of clipping.
+
+    Identity below `knee`; above it the excess is compressed exponentially, so
+    the mapping stays STRICTLY INCREASING (no ties at the top) and asymptotes
+    to `ceiling` without ever reaching it. Continuous with slope 1 at the knee.
+    Accepts scalars or arrays.
+    """
+    arr = np.asarray(p, dtype=float)
+    span = max(float(ceiling) - float(knee), 1e-6)
+    excess = np.maximum(arr - knee, 0.0)
+    out = np.where(arr > knee, knee + span * (1.0 - np.exp(-excess / span)), arr)
+    out = np.clip(out, P_GAME_FLOOR, ceiling)
+    return float(out) if np.ndim(arr) == 0 else out
+
 # Full feature vector logged with every graded hitter-day: the model's raw
 # inputs + context. This is what lets the system eventually LEARN its weights
 # from real outcomes (fit_feature_model) instead of the hand-set
@@ -374,7 +404,7 @@ def apply_feature_model(df: pd.DataFrame) -> pd.DataFrame:
         p_out = (1.0 - w) * p_raw + w * p_learn
         p_out = np.clip(p_out, 0.6 * p_raw, 1.4 * p_raw)
         df = df.copy()
-        df["hr_prob_game"] = np.round(np.clip(p_out, 0.002, 0.35), 4)
+        df["hr_prob_game"] = np.round(soft_cap(p_out), 4)
     except Exception:
         return df
     return df
@@ -473,6 +503,26 @@ def reload_tuning() -> None:
     _load_tuning.cache_clear()
 
 
+def _interp_calibration(p: float, preds: np.ndarray, actuals: np.ndarray) -> float:
+    """Map a probability through the binned curve, extrapolating at the ENDS.
+
+    `np.interp` holds the end values flat outside the bin range, which collapsed
+    every bat above the top bin onto ONE number — the single worst place to lose
+    resolution, since that's where picks are made. Outside the range we instead
+    carry the end bin's actual/predicted RATIO, which keeps the mapping strictly
+    increasing and continuous at the boundary.
+    """
+    if len(preds) == 0:
+        return p
+    if p >= preds[-1]:
+        ratio = (actuals[-1] / preds[-1]) if preds[-1] > 0 else 1.0
+        return p * ratio
+    if p <= preds[0]:
+        ratio = (actuals[0] / preds[0]) if preds[0] > 0 else 1.0
+        return p * ratio
+    return float(np.interp(p, preds, actuals))
+
+
 def calibrate_game_prob(p: float) -> float:
     """Map a raw game HR probability through the learned real-outcome curve.
 
@@ -486,12 +536,13 @@ def calibrate_game_prob(p: float) -> float:
         return p
     preds = np.array([b["pred"] for b in bins], dtype=float)
     actuals = np.array([b["actual"] for b in bins], dtype=float)
-    p_cal = float(np.interp(p, preds, actuals))
+    p_cal = _interp_calibration(float(p), preds, actuals)
     w = min(1.0, n / FULL_TRUST_ROWS)          # trust grows with the record
     p_out = w * p_cal + (1.0 - w) * float(p)
-    # Clamp: never more than ±40% relative shift, always a sane absolute band.
-    p_out = float(np.clip(p_out, 0.6 * p, 1.4 * p))
-    return float(np.clip(p_out, 0.002, 0.35))
+    # Guardrail on how far the curve may move a raw probability, then a SOFT
+    # ceiling so elite bats stay ordered instead of all printing the cap.
+    p_out = float(np.clip(p_out, CAL_MIN_MULT * p, CAL_MAX_MULT * p))
+    return float(soft_cap(p_out))
 
 
 # --------------------------------------------------------------------------- #

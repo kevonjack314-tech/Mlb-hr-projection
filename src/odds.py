@@ -27,6 +27,7 @@ import requests
 
 from .statcast import normalize_name
 from .trends import TIER_ODDS_BAND, tier_of
+from .tuning import soft_cap
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 DEFAULT_HOLD = 0.10  # typical HR-prop hold used for model-implied book odds
@@ -301,7 +302,8 @@ def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.Da
         df["game_total"] = df["home_team"].map(totals)
         tot_mult = 1.0 + (df["game_total"] - LEAGUE_GAME_TOTAL) * 0.022
         tot_mult = tot_mult.clip(0.93, 1.08).fillna(1.0)
-        df["hr_prob_game"] = (df["hr_prob_game"] * tot_mult).clip(0.002, 0.35).round(4)
+        df["hr_prob_game"] = pd.Series(
+            soft_cap(df["hr_prob_game"] * tot_mult), index=df.index).round(4)
     else:
         df["game_total"] = np.nan
 
@@ -326,7 +328,9 @@ def attach_odds(df: pd.DataFrame, date_iso: str, use_live: bool = True) -> pd.Da
         blended = ((1.0 - MARKET_BLEND_W) * df["hr_prob_game"]
                    + MARKET_BLEND_W * market_fair)
         df["hr_prob_game"] = np.where(
-            df["odds_is_live"], blended.clip(0.002, 0.35).round(4), df["hr_prob_game"])
+            df["odds_is_live"],
+            pd.Series(soft_cap(blended), index=df.index).round(4),
+            df["hr_prob_game"])
 
     if "fair_odds" in df.columns:   # keep fair odds consistent with the final prob
         df["fair_odds"] = df["hr_prob_game"].map(prob_to_american)
