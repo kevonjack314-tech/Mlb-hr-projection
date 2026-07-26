@@ -2,6 +2,8 @@
 
 import datetime as dt
 
+import pytest
+
 from src.demo import build_demo_slate
 from src.model import (
     effective_bat_side,
@@ -189,13 +191,14 @@ def test_odds_and_parlay_generator():
     for c in ("book_odds", "edge_pct", "implied_prob"):
         assert c in df.columns
 
-    # ULX composition by leg count.
+    # Record-driven composition by leg count: Anchor + Value, no forced
+    # longshot (the graded log says longshot legs badly under-perform).
     expect = {1: ["Anchor"], 2: ["Anchor", "Value"],
-              3: ["Anchor", "Value", "Longshot"],
-              4: ["Anchor", "Value", "Value", "Longshot"],
-              5: ["Anchor", "Value", "Value", "Longshot", "Longshot"]}
+              3: ["Anchor", "Value", "Value"],
+              4: ["Anchor", "Anchor", "Value", "Value"],
+              5: ["Anchor", "Anchor", "Value", "Value", "Value"]}
     for n in range(1, 6):
-        res = generate_parlay(df, n_legs=n, strategy="ulx")
+        res = generate_parlay(df, n_legs=n, strategy="model")
         legs = res["legs"]
         assert len(legs) == n
         assert list(legs["role"]) == expect[n]
@@ -203,7 +206,7 @@ def test_odds_and_parlay_generator():
         assert legs["game"].nunique() == n
         s = res["summary"]
         assert s["combined_decimal"] >= 1.0 and 0 <= s["model_prob"] <= 100
-        assert s["checks_total"] == 11
+        assert s["checks_total"] == 12
 
     # Custom selection grades too.
     cust = summarize_selection(df, list(df["player"].head(3)))
@@ -216,7 +219,7 @@ def test_lineup_spot_and_recurring_log(tmp_path, monkeypatch):
     from src.lineup import (attach_spot_signal, expected_pa, league_spot_table,
                             player_spot_hr, spot_role_fit, update_log_from_history)
 
-    # Expected PA monotonically falls down the order; spot role fit matches ULX.
+    # Expected PA monotonically falls down the order; spot role fit is sane.
     assert expected_pa(1) > expected_pa(5) > expected_pa(9)
     assert spot_role_fit(4, "Anchor") > spot_role_fit(8, "Anchor")
     assert spot_role_fit(9, "Longshot") > spot_role_fit(3, "Longshot")
@@ -310,32 +313,35 @@ def test_boxscore_hr_hitters_extraction(monkeypatch):
     assert cam["team"] == "TB" and cam["pitcher_name"] == "Carlos Rodon"
 
 
-def test_ulx_power_checklist_and_environment():
-    from src.ulx import N_POWER_CHECKS, hr_environment, power_checks
-    # An elite power profile passes most checks -> GREEN + smasher.
-    elite = {"barrel_pct": 16, "hard_hit_pct": 50, "xslg": 0.520, "iso": 0.250,
-             "sweet_spot_pct": 34, "avg_ev": 92, "launch_angle": 18,
-             "pull_pct": 42, "hr_fb": 22}
-    r = power_checks(elite)
-    assert r["ulx_checks"] == N_POWER_CHECKS and "GREEN" in r["ulx_grade"]
-    assert r["same_handed_smasher"] is True
-    # A weak profile -> RED.
-    weak = {"barrel_pct": 3, "hard_hit_pct": 30, "xslg": 0.330, "iso": 0.090,
-            "sweet_spot_pct": 25, "avg_ev": 85, "launch_angle": 4,
-            "pull_pct": 28, "hr_fb": 6}
-    assert "RED" in power_checks(weak)["ulx_grade"]
-    # HR hunting mode when several environment signals align.
+def test_hr_environment_flags():
+    from src.parks import hr_environment
+    # Hunting mode when several environment signals align.
     env = hr_environment({"wind_mult": 1.10, "temp_f": 88, "park_factor": 112,
                           "pitcher_hr9": 1.6, "pitcher_lean": "FB"})
     assert env["hr_hunting"] is True and env["hr_env_count"] == 5
-
+    # A dead environment trips nothing.
+    dead = hr_environment({"wind_mult": 0.92, "temp_f": 58, "park_factor": 92,
+                           "pitcher_hr9": 0.7, "pitcher_lean": "GB"})
+    assert dead["hr_hunting"] is False and dead["hr_env_count"] == 0
     # Flows through the scored slate.
     df = _slate()
-    assert df["ulx_checks"].between(0, 9).all()
-    assert df["ulx_grade"].str.contains("GREEN|YELLOW|RED").all()
+    assert df["hr_env_score"].between(0, 100).all()
 
 
-def test_ulx_prop_ladder_and_decision_tree():
+def test_no_ulx_dependency_remains():
+    """The model is driven by data + the graded record, not the ULX checklist."""
+    import importlib
+    import pathlib
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("src.ulx")
+    df = _slate()
+    assert not [c for c in df.columns if "ulx" in c.lower()]
+    src = pathlib.Path("src")
+    for f in list(src.glob("*.py")) + [pathlib.Path("app.py")]:
+        assert "ulx" not in f.read_text().lower(), f"ULX reference left in {f}"
+
+
+def test_prop_ladder_and_decision_tree():
     from src.odds import attach_odds
     from src.props import BET_TYPES, attach_props, build_ladder_parlay
 
@@ -345,9 +351,9 @@ def test_ulx_prop_ladder_and_decision_tree():
         assert df[f"prob_{b}"].between(0.0, 0.9).all()
     # Decision tree outputs valid recommendations.
     assert df["best_bet"].isin(BET_TYPES + ["PASS"]).all()
-    # HR recommendation requires an elite ULX profile.
+    # HR recommendation requires a genuinely elite HR spot by the model.
     hr_picks = df[df["best_bet"] == "HR"]
-    assert (hr_picks["ulx_checks"] >= 7).all()
+    assert (hr_picks["hr_prob_game"] >= 0.15).all()
     # SB recommendation requires real speed.
     sb_picks = df[df["best_bet"] == "SB"]
     if len(sb_picks):
@@ -443,7 +449,7 @@ def test_daily_self_improvement_calibration(tmp_path, monkeypatch):
     log = pd.DataFrame({
         "date": "2026-07-01", "player": [f"P{i}" for i in range(800)],
         "team": "X", "lineup_spot": 4, "hr_prob_game": pred,
-        "hr_score": 50, "ulx_checks": 5,
+        "hr_score": 50,
         "parlay_role": (["Anchor"] * 40 + ["Value"] * 40 + ["Longshot"] * 40
                         + [""] * 680),
         "top_pick": 0, "hit_hr": hit,
@@ -533,10 +539,10 @@ def test_hr_of_day_and_parlay_shuffle():
     assert row is not None and 0 <= row["confidence"] <= 100
 
     # Shuffle (seeded) produces multiple distinct valid tickets.
-    combos = {tuple(generate_parlay(df, 3, "ulx", seed=s)["legs"]["player"])
+    combos = {tuple(generate_parlay(df, 3, "model", seed=s)["legs"]["player"])
               for s in range(8)}
     assert len(combos) >= 2
     # Default (no seed) is deterministic.
-    a = tuple(generate_parlay(df, 3, "ulx")["legs"]["player"])
-    b = tuple(generate_parlay(df, 3, "ulx")["legs"]["player"])
+    a = tuple(generate_parlay(df, 3, "model")["legs"]["player"])
+    b = tuple(generate_parlay(df, 3, "model")["legs"]["player"])
     assert a == b
