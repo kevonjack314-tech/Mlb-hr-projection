@@ -17,6 +17,7 @@ import math
 import os
 from functools import lru_cache
 
+import numpy as np
 import pandas as pd
 
 _DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "park_factors.csv")
@@ -225,3 +226,38 @@ def humidity_hr_multiplier(humidity_pct: float | None, altitude_ft: float = 0.0)
         return 1.0
     mult = 1.0 + (humidity_pct - 50.0) * 0.0004
     return max(0.98, min(1.02, mult))
+
+
+# --------------------------------------------------------------------------- #
+# HR environment (park + weather + opposing starter)
+# --------------------------------------------------------------------------- #
+def _val(row, key):
+    v = row.get(key)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if (isinstance(v, float) and np.isnan(v)) else v
+
+
+def hr_environment(row) -> dict:
+    """Score the home-run environment of a hitter's game from park, weather, and
+    the opposing starter. Returns a 0-100 score, the count of green flags, and a
+    'hunting mode' flag when several align."""
+    flags = []
+    wind = _val(row, "wind_mult")
+    flags.append(("Wind blowing out", wind is not None and wind >= 1.05))
+    temp = _val(row, "temp_f")
+    flags.append(("Warm temps (≥80°)", temp is not None and temp >= 80.0))
+    park = _val(row, "park_factor")
+    flags.append(("Hitter-friendly park", park is not None and park >= 105.0))
+    hr9 = _val(row, "pitcher_hr9")
+    flags.append(("Homer-prone starter (HR/9 ≥ 1.3)", hr9 is not None and hr9 >= 1.3))
+    flags.append(("Fly-ball starter", str(row.get("pitcher_lean", "")).upper() == "FB"))
+    n = sum(1 for _, ok in flags if ok)
+    return {
+        "hr_env_flags": flags,
+        "hr_env_count": n,
+        "hr_env_score": round(100.0 * n / len(flags), 1),
+        "hr_hunting": n >= 3,
+    }

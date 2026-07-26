@@ -23,6 +23,7 @@ import pandas as pd
 
 from .parks import (
     daynight_hr_multiplier,
+    hr_environment,
     get_park,
     humidity_hr_multiplier,
     park_hr_multiplier,
@@ -31,7 +32,7 @@ from .parks import (
     wind_hr_multiplier,
 )
 from .tuning import calibrate_game_prob
-from .ulx import hr_environment, power_checks
+
 
 # League average HR per plate appearance (modern run environment).
 LEAGUE_HR_PER_PA = 0.034
@@ -444,13 +445,7 @@ def score_row(row: pd.Series) -> dict:
     out["gb_score"] = round(gb_score, 1)
     out["ld_score"] = round(ld_score, 1)
 
-    # --- ULX power checklist + HR environment (instilled thresholds) ---
-    ulx = power_checks(row)
-    out["ulx_checks"] = ulx["ulx_checks"]
-    out["ulx_total"] = ulx["ulx_total"]
-    out["ulx_score"] = ulx["ulx_score"]
-    out["ulx_grade"] = ulx["ulx_grade"]
-    out["same_handed_smasher"] = ulx["same_handed_smasher"]
+    # --- HR environment (park + weather + opposing starter) ---
     hr_env = hr_environment({
         "wind_mult": out["wind_mult"], "temp_f": row.get("temp_f"),
         "park_factor": out["park_factor"], "pitcher_hr9": row.get("pitcher_hr9"),
@@ -502,19 +497,15 @@ def score_row(row: pd.Series) -> dict:
     out["fair_odds"] = _prob_to_american(p_game)
 
     # --- Longshot Score (boom-or-bust ceiling) ---
-    # ULX: "longshots don't win parlays, PROFILES do" — the power checklist is the
-    # backbone, alongside air-ball power (fly-ball rate, HR/FB, pull) and the spot's
-    # HR environment.
-    # Data first, checklist second: raw batted-ball power + air-ball profile
-    # carry the score; the ULX checklist keeps a reduced sanity-check weight.
+    # Pure measured signal: raw power (max EV, barrels) plus the air-ball
+    # profile that turns power into home runs, then environment and matchup.
     longshot = (
-        0.12 * ulx["ulx_score"]
-        + 0.26 * out["max_ev_score"]
-        + 0.18 * out["barrel_score"]
-        + 0.12 * fb_score
-        + 0.10 * hr_fb_score
-        + 0.06 * pull_score
-        + 0.10 * env["env_score"]
+        0.30 * out["max_ev_score"]
+        + 0.22 * out["barrel_score"]
+        + 0.14 * fb_score
+        + 0.12 * hr_fb_score
+        + 0.08 * pull_score
+        + 0.08 * env["env_score"]
         + 0.06 * matchup_score
     )
     # Reward variance (more swing-and-miss & more chasing = more boom-or-bust) and

@@ -80,11 +80,11 @@ keeps the lineup HR log fresh.
    decile), the hottest HR parks, **HRs-by-lineup-spot**, a **Profile Match %** for
    today's bats, and the **Top-5 list in each category**.
 6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
-   ULX formula): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
+   model): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
    bats (underpriced profiles, 6-7), and **🚀 Deep-Space Longshots** (overlooked
    ceiling, 7-9), diversified across games, archetypes **and lineup spots** and
-   graded on an 11-point checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
-   win %, and **EV**, plus a "build your own" mode. Strategies: ULX role-based,
+   graded on a 12-point data checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
+   win %, and **EV**, plus a "build your own" mode. Strategies: Model-driven,
    Safest, Best-value (edge), Boom.
 7. **💎 Value Finder** — ranks the biggest **model-vs-book edges** (positive
    **Edge%** = +EV), filterable by role / probability / live-only, with a one-click
@@ -131,7 +131,7 @@ Every hitter carries a **lineup spot (1–9)** — live from the posted batting 
 when available, else estimated. It feeds the model three ways:
 - **Expected PA by spot** (top of order bats more, ~4.6 → 3.7 PA) folds directly
   into the per-game HR probability.
-- **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
+- **Role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
   Longshots to 7-9, and checks "different lineup spots".
 - **SP HRs@Spot** — each hitter is tagged with how many HRs the opposing starter
   has allowed to *their* lineup spot over his last 10 games; bats in a vulnerable
@@ -152,35 +152,44 @@ when available, else estimated. It feeds the model three ways:
 
 ### The prop ladder & betting pyramid (instilled)
 
-`src/props.py` encodes the ULX betting syllabus — *"don't get stuck on HRs"*:
+`src/props.py` grades every bat for the prop that fits — *"don't get stuck on HRs"*:
 - **Bet-type suitability (0–100)** per hitter for **HR · Total Bases · Hits ·
-  Runs · RBIs · Doubles · Stolen Bases**, from the ULX cheat-sheet drivers
+  Runs · RBIs · Doubles · Stolen Bases**, from the measured drivers
   (e.g. TB = hits+power+lineup position; SB = sprint speed gates everything;
   R = top of the order + on-base; RBI = 3-5 traffic + slug) and the
   **manager's lineup-spot roles** (leadoff sets the table, 3-4 heart of order,
   7-9 hidden value zone).
-- **Estimated cash %** per bet type = the ULX hit-rate pyramid baselines
+- **Estimated cash %** per bet type = league hit-rate baselines
   (Hits 70-80% … HR 8-15%) scaled by the bat's fit (HR uses the real model
   probability). Labeled as estimates.
-- **ULX Best Bet decision tree** per player: elite HR profile → HR, else
+- **Best Bet decision tree** per player: elite model HR spot → HR, else
   doubles → Runs → SB → Hits/TB, else **pass the player**.
 - **🪜 Mixed Ladder** in the Parlays tab: one leg per bet type from different
   games, mirroring the pyramid mix (~10% HR / XBH / TB / SB / volume base).
-- **Fade recency** (ULX 106) is already structural: underlying quality carries
+- **Fade recency** is structural: underlying quality carries
   the biggest weight (0.34) while recent form is capped and only 0.16.
 
-### ULX methodology (instilled)
+### What drives the picks (data, not a checklist)
 
-The model encodes the ULX playbook ("bet the profile, not the name") in `src/ulx.py`:
-- **Power checklist** — each bat is graded 🟢/🟡/🔴 on 9 minimums: Barrel% ≥ 8,
-  Hard-Hit% ≥ 40, xSLG ≥ .450, ISO ≥ .160, Sweet-Spot% ≥ 30, Avg EV ≥ 88, Launch
-  10–28°, Pull% ≥ 35, HR/FB ≥ 12. The check count (**ULX ✓**) is the backbone of the
-  Longshot score and boosts Value/Longshot legs in parlay selection.
-- **Platoon is the first filter** (already in the matchup), with a **same-handed
-  smasher** exception (elite power that homers regardless of handedness).
-- **Longshots bat 5–9** (overlooked) in the parlay role-fit.
-- **HR environment / "🔥 HR Hunting Mode"** — wind out, warm temps, hitter park, and
-  a homer-prone / fly-ball starter; flagged per game in the Lineups tab.
+There is **no hand-written scoring checklist** anywhere in the pick path. Every
+leg, every featured pick and every ranking comes from measured signal plus the
+model's own graded track record:
+
+- **Measured inputs** — Statcast batted-ball quality and bat tracking, batted-ball
+  mix, plate discipline, expected stats, 14-day contact-quality *trend*, real
+  platoon splits, fence geometry vs the hitter's pull side, the starter's
+  meatball rate / velo trend / 3rd-time-through penalty / hitter's-count
+  predictability, bullpen exposure, park + weather + start time, lineup spot,
+  fatigue, series familiarity, and batter-vs-pitcher history.
+- **The graded record** — a self-calibrating probability curve, per-role
+  reliability factors, and a **learned feature model** that re-weights every one
+  of those inputs from real outcomes (see the 🏅 Record view's importance panel).
+- **Parlay composition follows the record, not a playbook.** Value legs have
+  beaten their predicted hit rate in the graded log while longshot legs have
+  badly missed theirs, so the default ticket is ⚓ Anchor + 💰 Value(s) and does
+  **not** force a longshot in. `strategy="boom"` is there if you want one.
+- **HR environment** — wind out, warm temps, hitter park, and a homer-prone /
+  fly-ball starter; flagged per game in the Lineups tab (`src/parks.py`).
 
 ### 🤖 Daily self-improvement (gets more accurate every day)
 
@@ -510,7 +519,7 @@ modeled slates so the whole analysis runs without network.
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
 │   ├── odds.py             # live HR odds (The Odds API) + tier-banded model fallback
 │   ├── trends.py           # Trends Lab: player tiers + 12 HR pattern detectors
-│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator (tier-aware)
+│   ├── parlay.py           # model/record-driven 1-5 leg HR parlay generator
 │   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
 │   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 10 games)
 │   ├── learn.py            # self-calibration: HR rate by model rating

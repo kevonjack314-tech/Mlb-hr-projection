@@ -178,11 +178,9 @@ GLOSSARY = {
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
-    "ULX": "ULX power-checklist grade — 🟢 GREEN (≥7 of 9 minimums met, run it), 🟡 YELLOW (4-6, consider), 🔴 RED (<4, fade). Bet the profile, not the name.",
-    "ULX ✓": "How many of the 9 ULX power minimums the bat meets: Barrel%≥8, Hard-Hit%≥40, xSLG≥.450, ISO≥.160, Sweet-Spot%≥30, AvgEV≥88, Launch 10-28°, Pull%≥35, HR/FB≥12.",
-    "ISO": "Isolated power (SLG − AVG) — raw power output. ULX longshot minimum ≥ .160.",
-    "Sweet-Spot%": "Share of batted balls in the 8-32° launch-angle sweet spot (real, Statcast). ULX minimum ≥ 30%.",
-    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor). ULX minimum ≥ 8%.",
+    "ISO": "Isolated power (SLG − AVG) — raw power output.",
+    "Sweet-Spot%": "Share of batted balls in the 8-32° launch-angle sweet spot (real, Statcast).",
+    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
     "Barrel/PA%": "Barrels per plate appearance (real, Statcast) — barrel rate scaled by how often the bat puts a ball in play; an elite season-long HR signal.",
     "xHR (season)": "Season expected home runs from batted-ball quality (barrels/PA + fly-ball rate). The gap vs actual HR flags luck/regression.",
     "HR−xHR": "Actual HR minus expected HR. Negative = under-performing the quality of contact (a positive-regression / 'due' candidate, used in the Sneaky score).",
@@ -363,8 +361,6 @@ DISPLAY_COLUMNS = {
     "position": "Pos",
     "lineup_spot": "Spot",
     "player_tier": "Tier",
-    "ulx_grade": "ULX",
-    "ulx_checks": "ULX ✓",
     "hr_score": "HR Score",
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
@@ -438,7 +434,6 @@ DISPLAY_COLUMNS = {
 # view shows everything. The active headline/sort column is always added back.
 ESSENTIAL_KEYS = {
     "player", "team", "opponent", "pitcher_name", "lineup_spot", "player_tier",
-    "ulx_grade", "ulx_checks",
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
@@ -465,8 +460,6 @@ COLUMN_CONFIG = {
     "vs-Hand wOBA": st.column_config.NumberColumn("vs-Hand wOBA", help=GLOSSARY["vs-Hand wOBA"], format="%.3f"),
     "Opp Pen HR/9": st.column_config.NumberColumn("Opp Pen HR/9", help=GLOSSARY["Opp Pen HR/9"], format="%.2f"),
     "Game Total": st.column_config.NumberColumn("Game Total", help=GLOSSARY["Game Total"], format="%.1f"),
-    "ULX": st.column_config.TextColumn("ULX", help=GLOSSARY["ULX"]),
-    "ULX ✓": st.column_config.NumberColumn("ULX ✓", help=GLOSSARY["ULX ✓"], format="%d/9"),
     "ISO": st.column_config.NumberColumn("ISO", help=GLOSSARY["ISO"], format="%.3f"),
     "Sweet-Spot%": st.column_config.NumberColumn("Sweet-Spot%", help=GLOSSARY["Sweet-Spot%"], format="%.1f"),
     "xHR (game)": st.column_config.NumberColumn("xHR (game)", help=GLOSSARY["xHR (game)"], format="%.2f"),
@@ -639,8 +632,7 @@ def _top3_card(rank_emoji: str, row: pd.Series, headline: str, headline_val: str
             f"Hard-Hit% **{_fmt(row.get('hard_hit_pct'))}** · "
             f"FB% **{_fmt(row.get('fb_pct'))}** · "
             f"HR/FB **{_fmt(row.get('hr_fb'))}** · "
-            f"Max EV **{_fmt(row.get('max_ev'))}** · "
-            f"ULX {row.get('ulx_grade','—')}"
+            f"Max EV **{_fmt(row.get('max_ev'))}**"
         )
         if row.get("rationale"):
             st.caption(f"💡 {row['rationale']}")
@@ -658,7 +650,7 @@ def _team_pick_line(rank: str, row: pd.Series) -> None:
                 f"  \n<span style='opacity:0.75;font-size:0.85em'>"
                 f"{row.get('player_tier','')}{spot_txt} · HR Score {row.get('hr_score',0):.0f} · "
                 f"Barrel% {_fmt(row.get('barrel_pct'))} · HR/FB {_fmt(row.get('hr_fb'))} · "
-                f"Max EV {_fmt(row.get('max_ev'))} · ULX {row.get('ulx_grade','—')}{bvp_txt}</span>",
+                f"Max EV {_fmt(row.get('max_ev'))}{bvp_txt}</span>",
                 unsafe_allow_html=True)
     if row.get("rationale"):
         st.caption(f"💡 {row['rationale']}")
@@ -715,7 +707,7 @@ def tab_by_matchup(df: pd.DataFrame):
     show_cols = [c for c in ["game", "team", "opponent", "player", "player_tier",
                              "lineup_spot", "pitcher_name", "hr_prob_game",
                              "hr_score", "book_odds", "barrel_pct", "hr_fb",
-                             "max_ev", "ulx_grade", "rationale"] if c in picks.columns]
+                             "max_ev", "rationale"] if c in picks.columns]
     export = picks[show_cols].copy()
     if "hr_prob_game" in export.columns:
         export["hr_prob_game"] = (export["hr_prob_game"] * 100).round(0)
@@ -790,7 +782,7 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "lineup_spot",
-            "ulx_grade", "ulx_checks", "longshot_score", "hr_prob_game", "book_odds",
+            "longshot_score", "hr_prob_game", "book_odds",
             "edge_pct", "sp_hr_at_spot", "max_ev", "barrel_pct", "iso",
             "sweet_spot_pct", "hr_fb", "pull_pct", "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
@@ -971,7 +963,7 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
             "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
             "Model Score": st.column_config.ProgressColumn("Model Score", help="The model's pre-game HR Score (0-100) for this bat.", min_value=0, max_value=100, format="%.0f"),
             "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
-            "Role": st.column_config.TextColumn("Role", help="ULX role the model put them in pre-game (Anchor/Value/Longshot)."),
+            "Role": st.column_config.TextColumn("Role", help="Tier band the model put them in pre-game (Anchor/Value/Longshot)."),
             "Model take": st.column_config.TextColumn("Model take", help="Did the model like them pre-game? ✅ Loved / 👍 Liked / 😐 Lukewarm / ⚠️ Missed."),
             "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
             "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
@@ -1424,8 +1416,8 @@ def _render_parlay(result, stake, key: str = "parlay"):
         st.info(f"{light} · EV is {ev:+.0f}% on model-implied odds (you pay the hold). "
                 "Turn on live odds + shop books to find real +EV.")
 
-    # Checklist (ULX 10-point).
-    with st.expander(f"📋 ULX checklist — {s['checks_passed']}/{s['checks_total']} · {light}", expanded=True):
+    # Data-driven quality checklist.
+    with st.expander(f"📋 Quality checks — {s['checks_passed']}/{s['checks_total']} · {light}", expanded=True):
         cc = st.columns(2)
         for i, (label, ok) in enumerate(result["checklist"]):
             cc[i % 2].markdown(f"{'✅' if ok else '⬜'} {label}")
@@ -1439,18 +1431,18 @@ def _render_parlay(result, stake, key: str = "parlay"):
 
 def _hr_parlay_builder(df):
     st.caption(
-        "Build HR parlays with **roles, not names** (the ULX formula): an **⚓ Anchor** "
+        "Build HR parlays from measured signal: an **⚓ Anchor** "
         "(highest-confidence bat), **💰 Value** bats (underpriced profiles), and "
         "**🚀 Deep-Space Longshots** (overlooked ceiling). Diversified across games & "
-        "archetypes, graded on the ULX checklist. *Research/entertainment only.*"
+        "archetypes, graded on a data-driven checklist. *Research/entertainment only.*"
     )
 
     c1, c2, c3, c4 = st.columns(4)
     n_legs = c1.slider("Legs", 1, 5, 3)
     strategy = c2.selectbox(
         "Strategy",
-        ["ulx", "safe", "value", "boom"],
-        format_func={"ulx": "ULX role-based", "safe": "Safest (highest prob)",
+        ["model", "safe", "value", "boom"],
+        format_func={"model": "Model-driven (recommended)", "safe": "Safest (highest prob)",
                      "value": "Best value (edge)", "boom": "Boom (longshots)"}.get,
     )
     max_per_game = c3.selectbox("Max bats / game", [1, 2], index=0)
@@ -1482,10 +1474,10 @@ def _hr_parlay_builder(df):
 
 def _mixed_ladder(df):
     st.caption(
-        "The **ULX betting pyramid** — *don't get stuck on HRs*. One leg per bet "
+        "The **risk ladder** — *don't get stuck on HRs*. One leg per bet "
         "type (💣 HR · 🟧 Double · 🟩 Total Bases · 🏃 Stolen Base · 🔷 Run), each from a "
         "different game: high-risk top, volume base. Non-HR cash rates are "
-        "**modeled estimates** from the ULX hit-rate pyramid scaled by each bat's "
+        "**modeled estimates** from league hit-rate baselines scaled by each bat's "
         "profile fit."
     )
     n = st.slider("Legs", 2, 5, 5, key="ladder_legs",
@@ -1515,14 +1507,14 @@ def _mixed_ladder(df):
     c1.metric("Ticket (est.)", format_american(s["combined_american"]))
     c2.metric("Est. win %", f"{s['combined_prob']}%")
     c3.metric("$10 pays (est.)", f"${s['payout_per_10']:,.0f}")
-    st.caption("💡 ULX golden rules: never bet the same thing in every game · stack "
+    st.caption("💡 Golden rules: never bet the same thing in every game · stack "
                "ways to cash · volume is king at the base of the ticket.")
 
 
 def _prop_boards(df):
     st.caption(
         "**The prop ladder** — pick a bet type and see which bats fit it best "
-        "(ULX cheat-sheet drivers + lineup-spot role). **ULX Best Bet** runs each "
+        "(measured drivers + lineup-spot role). **Best Bet** runs each "
         "player through the decision tree: elite HR profile → HR, else 2B → Run → "
         "SB → Hits/TB, else pass."
     )
@@ -1542,7 +1534,7 @@ def _prop_boards(df):
                  if src_col is not None else "🟡 est"),
         "Edge%": (b[f"edge_{bet}_pct"] if f"edge_{bet}_pct" in b.columns
                   else pd.Series(np.nan, index=b.index)),
-        "ULX Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
+        "Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
         "Why": b["best_bet_reason"],
     })
     if has_live:
@@ -1553,10 +1545,10 @@ def _prop_boards(df):
         height=min(560, 60 + 35 * min(len(show), 14)),
         column_config={
             "Fit": st.column_config.ProgressColumn(
-                "Fit", help="How well this bat fits the bet type (ULX drivers + lineup spot).",
+                "Fit", help="How well this bat fits the bet type (measured drivers + lineup spot).",
                 min_value=0, max_value=100, format="%.0f"),
             "Cash %": st.column_config.NumberColumn(
-                "Cash %", help="Model cash probability (ULX pyramid base rate scaled "
+                "Cash %", help="Model cash probability (league base rate scaled "
                 "by fit; HR uses the real model probability).", format="%.0f%%"),
             "Odds": st.column_config.NumberColumn(
                 "Odds", help="Real book line when 🟢 LIVE (best price across books, "
@@ -1773,9 +1765,9 @@ def render_hr_of_day(df):
                 reasons.append("hot over the last 7 days")
             if row.get("consistency_score", 0) >= 65:
                 reasons.append("high floor / steady hard contact")
-            if pd.notna(row.get("ulx_checks")):
-                reasons.insert(0, f"ULX profile {row.get('ulx_grade','')} "
-                               f"({int(row['ulx_checks'])}/9 power checks)")
+            if pd.notna(row.get("barrel_score")) and row["barrel_score"] >= 65:
+                reasons.insert(0, f"elite batted-ball quality "
+                               f"({_fmt(row.get('barrel_pct'))}% barrel)")
             st.markdown("**Why we're confident:** " + "; ".join(reasons[:4]) + ".")
         with c2:
             m1, m2 = st.columns(2)
@@ -1822,7 +1814,7 @@ def render_top_picks(df):
                    f"{val['edge_pct']:+.1f}%", "model edge vs the book")
 
     with c4:
-        res = generate_parlay(df, n_legs=3, strategy="ulx")
+        res = generate_parlay(df, n_legs=3, strategy="model")
         s = res["summary"]
         names = " · ".join(res["legs"]["player"].tolist()) if not res["legs"].empty else "—"
         _pick_card("🎰 Suggested 3-leg", s.get("combined_american_str", "—"),
@@ -1887,7 +1879,7 @@ def tab_lineups(df, end_iso, prefer_live):
     games = sorted(df["game"].unique())
     game = st.selectbox("Game", games, key="lu_game")
     g = df[df["game"] == game]
-    # ULX "HR hunting mode" read for the game's environment.
+    # "HR hunting mode" read for the game's environment.
     env_count = int(g["hr_env_count"].max()) if "hr_env_count" in g.columns else 0
     if "hr_hunting" in g.columns and g["hr_hunting"].any():
         st.success(f"🔥 **HR Hunting Mode** — strong HR environment ({env_count}/5 "
@@ -1931,8 +1923,8 @@ def main():
             "2. **🏠 Today** — the HR of the Day and headline picks.\n"
             "3. **🎯 Picks** — Longshots, Consistent, Sneaky, Value, or the full board.\n"
             "4. **🎰 Parlays** — HR parlays, the **🪜 Mixed Ladder** (HR + doubles + "
-            "total bases + steals + runs, per the ULX pyramid), and per-bet **Prop "
-            "Boards** with each player's ULX Best Bet.\n"
+            "total bases + steals + runs across the risk ladder), and per-bet **Prop "
+            "Boards** with each player's Best Bet.\n"
             "5. **🧾 Lineups** & **📚 History** — today's orders and who's been homering.\n\n"
             "📲 **Install it like an app:** open this page in your phone browser → "
             "**Share / ⋮ menu → Add to Home Screen**.\n\n"
@@ -1986,10 +1978,9 @@ def main():
     sp_counts = load_sp_spot_counts(end_iso, prefer_live, _pairs)
     scored = attach_sp_spot_signal(scored, sp_counts)
     # Live Trends Lab signals (streaks, tier rotation, spot×weekday heat) —
-    # these now carry more pick weight than the ULX checklist.
     scored = attach_trend_signals(scored, events, game_date.strftime("%A"))
     scored = attach_odds(scored, end_iso, use_live=live_odds)
-    scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
+    scored = attach_props(scored)   # prop ladder: per-bet-type fit & est. odds
     # Real TB/Hits lines are opt-in inside the Parlays tab (extra API credits).
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)

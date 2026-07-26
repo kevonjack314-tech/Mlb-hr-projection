@@ -111,7 +111,7 @@ FEATURE_COLS = [
 ]
 
 EVAL_COLS = ["date", "player", "team", "lineup_spot", "hr_prob_game",
-             "hr_score", "ulx_checks", "parlay_role", "top_pick", "hr_of_day",
+             "hr_score", "parlay_role", "top_pick", "hr_of_day",
              "hit_hr"] + FEATURE_COLS
 
 # Parlay-leg feedback needs at least this many logged legs per role.
@@ -570,14 +570,14 @@ def evaluate_day(date_iso: str, prefer_live: bool = True):
         return None, f"slate source is {source} — skipping (real days only)"
     scored = score_slate(df)
 
-    # What would the builder have PICKED pre-game? Log the ULX 3-leg parlay
+    # What would the builder have PICKED pre-game? Log the 3-leg parlay
     # (by role) and the top-5 HR-Score picks so their real hit rates feed back
     # into future parlay selection.
     scored["parlay_role"] = ""
     scored["top_pick"] = 0
     try:
         with_odds = attach_odds(scored, date_iso, use_live=False)
-        legs = generate_parlay(with_odds, n_legs=3, strategy="ulx")["legs"]
+        legs = generate_parlay(with_odds, n_legs=3, strategy="model")["legs"]
         role_by_player = dict(zip(legs["player"], legs["role"]))
         scored["parlay_role"] = scored["player"].map(
             lambda p: role_by_player.get(p, ""))
