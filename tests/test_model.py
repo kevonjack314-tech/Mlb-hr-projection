@@ -30,9 +30,16 @@ def test_score_ranges_are_sane():
     assert df.longshot_score.between(0, 100).all()
     assert df.consistency_score.between(0, 100).all()
     assert df.sneaky_score.between(0, 100).all()
-    # Game HR probability should stay in a realistic band.
-    assert df.hr_prob_game.between(0.0, 0.35).all()
+    # Game HR probability should stay in a realistic band (soft-capped, so it
+    # approaches but never reaches P_GAME_CEIL).
+    from src.tuning import P_GAME_CEIL
+    assert df.hr_prob_game.between(0.0, P_GAME_CEIL).all()
     assert df.hr_prob_game.max() > 0.15  # at least some strong spots
+    # Regression guard: the top of the board must NOT flat-top. A hard clip
+    # used to make every elite bat print the same number, destroying the
+    # ordering exactly where picks are made.
+    top = df.hr_prob_game[df.hr_prob_game >= df.hr_prob_game.quantile(0.90)]
+    assert top.nunique() >= 0.8 * len(top), "top-decile probabilities are flat"
 
 
 def test_deterministic_by_date():
