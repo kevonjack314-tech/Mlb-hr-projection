@@ -1,50 +1,50 @@
 {
-  "n": 9673,
+  "n": 9943,
   "bins": [
     {
-      "pred": 0.0462,
-      "actual": 0.0025
+      "pred": 0.0449,
+      "actual": 0.0024
     },
     {
-      "pred": 0.0737,
-      "actual": 0.0223
+      "pred": 0.0725,
+      "actual": 0.0217
     },
     {
-      "pred": 0.0891,
-      "actual": 0.0471
+      "pred": 0.0883,
+      "actual": 0.0451
     },
     {
-      "pred": 0.1106,
-      "actual": 0.0827
+      "pred": 0.1097,
+      "actual": 0.078
     },
     {
-      "pred": 0.1361,
-      "actual": 0.1266
+      "pred": 0.1353,
+      "actual": 0.1248
     },
     {
-      "pred": 0.1524,
-      "actual": 0.1613
+      "pred": 0.1522,
+      "actual": 0.1609
     },
     {
-      "pred": 0.1771,
-      "actual": 0.2093
+      "pred": 0.177,
+      "actual": 0.206
     },
     {
-      "pred": 0.2476,
-      "actual": 0.2903
+      "pred": 0.248,
+      "actual": 0.2864
     }
   ],
-  "brier": 0.0962,
-  "updated": "2026-07-25",
+  "brier": 0.09476,
+  "updated": "2026-07-26",
   "role_factors": {
-    "Anchor": 1.017,
+    "Anchor": 1.014,
     "Longshot": 0.94,
-    "Value": 1.089
+    "Value": 1.082
   },
   "role_n": {
-    "Anchor": 40,
+    "Anchor": 41,
     "Longshot": 40,
-    "Value": 40
+    "Value": 42
   },
   "feature_model": {
     "n": 0,
@@ -53,29 +53,29 @@
       "hr_rate_7": {
         "zero_rate_hr": 0.002,
         "zero_rate_no_hr": 0.6289,
-        "mean_hr": 0.09449,
-        "mean_no_hr": 0.02544,
+        "mean_hr": 0.09435,
+        "mean_no_hr": 0.02539,
         "leaked": true
       },
       "hr_rate_15": {
         "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.3729,
-        "mean_hr": 0.06696,
-        "mean_no_hr": 0.02942,
+        "zero_rate_no_hr": 0.3769,
+        "mean_hr": 0.06687,
+        "mean_no_hr": 0.0293,
         "leaked": true
       },
       "hr_rate_30": {
         "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.2086,
-        "mean_hr": 0.054,
-        "mean_no_hr": 0.03037,
+        "zero_rate_no_hr": 0.2099,
+        "mean_hr": 0.05388,
+        "mean_no_hr": 0.03036,
         "leaked": true
       },
       "recent_form_score": {
         "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.3843,
-        "mean_hr": 76.56122,
-        "mean_no_hr": 26.99429,
+        "zero_rate_no_hr": 0.3809,
+        "mean_hr": 76.50212,
+        "mean_no_hr": 26.95066,
         "leaked": true
       }
     },
