@@ -506,6 +506,28 @@ on **relative** lineup strength (`center_to_league=True`).
 much of the projection is built on real posted lineups and real starter
 peripherals, so a big projected margin off two half-filled lineups can't win it.
 
+#### Score-predictor feedback loop
+
+Every projection is graded against the real final line score (MLB StatsAPI) by
+the daily job and logged to `data/game_eval_log.csv` (`src/gamegrade.py`), so
+the model's accuracy is measured rather than assumed:
+
+- **Runs MAE**, per side and on the total, plus the **bias** (is it projecting
+  too many runs, and where — `total_bias_by_park` surfaces parks whose run
+  factor has gone stale as a persistent one-sided miss).
+- **Winner accuracy vs an honest baseline.** "Picks winners 54%" means nothing
+  until you know that blindly taking the home team went 52%. Both numbers are
+  shown, and so is a moneyline **Brier** against the base-rate baseline.
+- **Win-probability calibration** by bucket — a model can pick winners at a
+  fine clip and still be badly miscalibrated, which is what turns a real edge
+  into a losing ticket once you're paying a price for it.
+- **Over/Under lean** accuracy (pushes excluded) and the **⭐ Game of the Day**
+  hit rate tracked separately.
+
+The record renders at the bottom of 🎯 Picks → 🔮 Score Predictor, and it says
+so in red when the model is **not** beating its baselines. Backfill or re-grade
+with `python scripts/grade_games.py [END_DATE] [DAYS] [--regrade]`.
+
 ### 5. Trailing-month backtest & profile matching
 
 The **HR Trends & Backtest** tab gathers every HR in a date window (default ~30
@@ -589,6 +611,7 @@ modeled slates so the whole analysis runs without network.
 ├── src/
 │   ├── parks.py            # park HR + RUN factors, wind / temp / humidity
 │   ├── gamescore.py        # projected final scores, win prob, totals, GOTD
+│   ├── gamegrade.py        # score-predictor record: MAE, calibration, baselines
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls

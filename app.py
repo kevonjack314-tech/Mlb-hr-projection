@@ -825,6 +825,93 @@ def tab_game_scores(df: pd.DataFrame):
         "the same side will be worse, so an edge only exists when the book is "
         "longer than the fair number shown."
     )
+    st.divider()
+    _render_score_record()
+
+
+def _render_score_record():
+    """How the score predictor has ACTUALLY done, against honest baselines."""
+    from src.gamegrade import (
+        game_record, load_game_log, total_bias_by_park, win_prob_calibration,
+    )
+    st.markdown("#### 📏 How this model has actually done")
+    log = load_game_log()
+    rec = game_record(log)
+    if not rec.get("n"):
+        st.info(
+            "No graded games yet. Every projection gets logged and scored "
+            "against the real final line score by the daily job — check back "
+            "once a day or two has settled. Until then, treat the numbers "
+            "above as untested."
+        )
+        return
+
+    st.caption(f"**{rec['n']:,}** games graded over **{rec['days']}** days, "
+               "against real MLB final scores.")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Runs MAE (per side)", f"{rec['mae_side']:.2f}")
+    c2.metric("Total MAE", f"{rec['mae_total']:.2f}")
+    c3.metric("Winner picked", f"{rec['winner_pct']:.0f}%",
+              f"{rec['winner_pct'] - rec['home_baseline_pct']:+.1f} vs always-home",
+              delta_color="normal")
+    c4.metric("Projected vs actual total",
+              f"{rec['avg_total_proj']:.1f} / {rec['avg_total_actual']:.1f}",
+              f"{rec['total_bias']:+.2f} runs bias", delta_color="off")
+
+    # The honest read. A model that loses to its own baseline should say so.
+    if rec["beats_home_baseline"] and rec["beats_brier_baseline"]:
+        st.success(
+            f"🟢 Beating both baselines — winners **{rec['winner_pct']:.0f}%** vs "
+            f"**{rec['home_baseline_pct']:.0f}%** for blindly taking the home "
+            f"team, and moneyline Brier **{rec['ml_brier']}** vs "
+            f"**{rec['ml_brier_baseline']}** for the base rate.")
+    elif rec["beats_home_baseline"] or rec["beats_brier_baseline"]:
+        st.warning(
+            f"🟡 Mixed — winners {rec['winner_pct']:.0f}% vs "
+            f"{rec['home_baseline_pct']:.0f}% home baseline; Brier "
+            f"{rec['ml_brier']} vs {rec['ml_brier_baseline']} base rate. "
+            "One of the two isn't clearing yet.")
+    else:
+        st.error(
+            f"🔴 Not beating the baselines yet — winners {rec['winner_pct']:.0f}% "
+            f"vs {rec['home_baseline_pct']:.0f}% for just taking the home team. "
+            "Treat these picks as unproven.")
+
+    if rec.get("total_pct") is not None:
+        st.caption(f"Over/Under lean: **{rec['total_pct']:.0f}%** on "
+                   f"{rec['total_n']} graded (pushes excluded)."
+                   + (f" · ⭐ Game of the Day: **{rec['gotd_winner_pct']:.0f}%** "
+                      f"on {rec['gotd_n']} picks"
+                      if rec.get("gotd_winner_pct") is not None else ""))
+
+    cal = win_prob_calibration(log)
+    if not cal.empty:
+        st.markdown("**Win-probability calibration** — a 60% side should win 60% "
+                    "of the time. Picking winners is not the same as pricing them.")
+        st.dataframe(
+            cal.rename(columns={"games": "Games", "predicted": "Predicted %",
+                                "actual": "Actual %", "gap": "Gap"}),
+            hide_index=True, use_container_width=True,
+            column_config={
+                "Predicted %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Actual %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Gap": st.column_config.NumberColumn(
+                    format="%+.1f",
+                    help="Actual minus predicted. Positive = the model is "
+                         "underrating that bucket."),
+            })
+
+    park = total_bias_by_park(log)
+    if not park.empty:
+        with st.expander("🏟️ Total bias by park — where the run factors are stale"):
+            st.caption("Positive bias = the model projects **too many** runs at "
+                       "that park. A persistent one-sided miss is the signal to "
+                       "retune that park's run factor.")
+            st.dataframe(
+                park.rename(columns={"home_team": "Park (home team)",
+                                     "games": "Games", "bias": "Bias (runs)",
+                                     "mae": "MAE"}),
+                hide_index=True, use_container_width=True)
 
 
 def tab_top3(df: pd.DataFrame):
