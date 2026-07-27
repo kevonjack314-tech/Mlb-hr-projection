@@ -1056,10 +1056,22 @@ def tab_pick_record():
 def _render_feature_importance():
     """Show which signals the LEARNED model actually weights — the black box,
     opened. Coefficients are on standardized features so they're comparable."""
-    from src.tuning import feature_importance
+    from src.tuning import _load_tuning, feature_importance
     fi = feature_importance(top_n=20)
     st.markdown("#### 🧠 What the learned model actually weights")
     if fi is None:
+        note = str((_load_tuning().get("feature_model") or {}).get("note", ""))
+        if "leakage" in note.lower():
+            st.warning(
+                "**Learned model disabled — target leakage found in the graded "
+                "record.** The 7/15/30-day HR-rate windows were built *through* "
+                "the game date, so a graded day's own home run was counted in "
+                "its own \"recent form\" — which is why the model had learned to "
+                "put ~43% of its weight there. The windows are fixed; picks are "
+                "running on the hand-tuned weights and the data until those "
+                "dates are re-graded."
+            )
+            return
         st.info("The learned feature model hasn't trained yet — it needs ~2,000 "
                 "graded hitter-days with the full feature vector. Until then the "
                 "hand-tuned weights drive the model. Check back as the record grows.")

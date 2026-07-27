@@ -374,8 +374,24 @@ The **power-quality** sub-score is itself a weighted blend
 Max EV **0.15**, Avg EV **0.10**. Barrel rate gets the most weight because it is
 the single best public predictor of home-run output.
 
-**Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.50**,
-15-day **0.30**, 30-day **0.20** — the hottest, most recent signal counts most.
+**Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.30**,
+15-day **0.35**, 30-day **0.35** — deliberately *not* front-loaded on the hottest
+window. Measured leak-free against the graded record, a hitter with **zero** HR in
+the prior week still homers at **0.90×** the league rate today, and one HR at
+**1.01×** — the "he's hot" week is close to noise until you get to 3+ HR (~1.7×,
+thin sample). The scored form value is then shrunk toward neutral by tier
+(`FORM_SHRINK`): **0.35** for stars (≥18 HR — their streaks measured essentially
+flat: 0.93× / 1.05× / 1.04×), **0.70** mid, **1.00** under-the-radar bats, where a
+hot week is partly a talent signal the season line hasn't caught up to.
+
+> **Leakage guard.** The rolling windows are built strictly *before* the game date.
+> They previously ran through it, so grading a past day fed that day's own home run
+> into its own "recent form" — which is why the learned model had piled ~43% of its
+> weight onto two features and still "beat" a holdout that leaked identically.
+> `tuning.leakage_report()` now checks the graded record on every fit (an honest
+> 7-day window must read exactly 0 on plenty of HR days), and `fit_feature_model()`
+> refuses to activate on a log that trips it. Re-grade with
+> `backfill_eval.py … --regrade` after any feature-window change.
 
 **Expected HR & regression.** A season **xHR** is computed from batted-ball quality
 (Barrels/PA, with a fly-ball term) × PA. The **HR − xHR** gap flags over- and

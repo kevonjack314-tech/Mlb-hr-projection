@@ -297,6 +297,51 @@ FEATURE_MODEL_MIN_ROWS = 2000    # don't even fit below this
 FEATURE_MODEL_TRUST_ROWS = 10000  # blend weight reaches its 0.5 cap here
 _FM_MIN_COVERAGE = 0.7           # a feature must be present on ≥70% of rows
 
+# Rolling-window features that must be computed strictly BEFORE the game date.
+# If a graded row's own home run leaks into them, the learned model rockets
+# their weight and validates beautifully on a holdout that is leaked too.
+LEAKY_CANDIDATES = ("hr_rate_7", "hr_rate_15", "hr_rate_30", "recent_form_score",
+                    "barrel_pct_14", "xwoba_14", "bvp_hr")
+
+
+def leakage_report(log: pd.DataFrame) -> dict:
+    """Detect target leakage in the graded record's rolling-window features.
+
+    The tell is simple. A 7-day HR-rate window that truly stops the day before
+    the game must be exactly 0 for plenty of players who then homer — plenty of
+    home runs are the hitter's first in a week. If almost no HR game shows a
+    zero window while most non-HR games do, the window is eating its own
+    outcome.
+
+    Returns {feature: {...}, "leaked": bool}. Pure + offline: it reads only the
+    log, so it runs in tests and in CI.
+    """
+    out: dict = {"leaked": False, "features": {}}
+    if log is None or log.empty or "hit_hr" not in log.columns:
+        return out
+    y = pd.to_numeric(log["hit_hr"], errors="coerce")
+    for f in LEAKY_CANDIDATES:
+        if f not in log.columns:
+            continue
+        v = pd.to_numeric(log[f], errors="coerce")
+        m = v.notna() & y.notna()
+        if m.sum() < 500:
+            continue
+        hit, miss = v[m & (y == 1)], v[m & (y == 0)]
+        if len(hit) < 100 or len(miss) < 100:
+            continue
+        z_hit, z_miss = float((hit == 0).mean()), float((miss == 0).mean())
+        # Leaked when non-HR days are routinely zero but HR days almost never
+        # are — a gap no honest prior-window feature produces.
+        leaked = bool(z_miss >= 0.20 and z_hit < 0.25 * z_miss)
+        out["features"][f] = {"zero_rate_hr": round(z_hit, 4),
+                              "zero_rate_no_hr": round(z_miss, 4),
+                              "mean_hr": round(float(hit.mean()), 5),
+                              "mean_no_hr": round(float(miss.mean()), 5),
+                              "leaked": leaked}
+        out["leaked"] = out["leaked"] or leaked
+    return out
+
 
 def _feature_matrix(df: pd.DataFrame, feats: list[str], medians: dict) -> np.ndarray:
     cols = []
@@ -317,6 +362,19 @@ def fit_feature_model(log: pd.DataFrame) -> dict:
     out = {"feature_model": {"n": 0, "active": False, "note": "warming up"}}
     if log is None or log.empty or "hit_hr" not in log.columns:
         return out
+
+    # Refuse to learn from a leaked record. A model fit on rows whose recent-form
+    # window contains the game's own home run will always "beat" the hand model
+    # on a holdout that leaks the same way — it validates itself into production.
+    leak = leakage_report(log)
+    if leak["leaked"]:
+        bad = ", ".join(k for k, v in leak["features"].items() if v["leaked"])
+        out["feature_model"] = {
+            "n": 0, "active": False, "leakage": leak["features"],
+            "note": f"DISABLED — target leakage in the graded record ({bad}); "
+                    f"regrade those dates before trusting learned weights"}
+        return out
+
     df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
     feats = [f for f in FEATURE_COLS if f in df.columns
              and pd.to_numeric(df[f], errors="coerce").notna().mean() >= _FM_MIN_COVERAGE]

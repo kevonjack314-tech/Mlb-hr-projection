@@ -91,8 +91,20 @@ POWER_QUALITY_WEIGHTS = {
     "avg_ev": 0.08,
 }
 
-# Recent-form blend (sum to 1.0): the 7-day window is the loudest signal.
-RECENT_FORM_WEIGHTS = {"hr_rate_7": 0.50, "hr_rate_15": 0.30, "hr_rate_30": 0.20}
+# Recent-form blend (sum to 1.0). The 7-day window is the LOUDEST signal but
+# not the most useful one: measured leak-free against the graded record, a full
+# prior week with zero HR only drops today's HR rate to 0.90x league, and one
+# HR is 1.01x — essentially noise. It takes 3+ in a week to reach ~1.7x, on a
+# thin sample. So the weight sits mostly on the stabler 15/30-day windows.
+RECENT_FORM_WEIGHTS = {"hr_rate_7": 0.30, "hr_rate_15": 0.35, "hr_rate_30": 0.35}
+
+# How much of the recent-form score to keep, by talent tier. Splitting the
+# graded record by season HR shows hot form is nearly worthless on stars
+# (0.93x / 1.05x / 1.04x by prior-week HR — flat) and matters most on the
+# lower tiers, where "hot" is partly a talent signal the season line hasn't
+# caught up to yet. Scores shrink toward neutral (50) by these factors.
+FORM_SHRINK = {"star": 0.35, "mid": 0.70, "under": 1.00}
+FORM_SHRINK_DEFAULT = 0.70
 
 
 def scale(value: float, lo: float, hi: float) -> float:
@@ -298,6 +310,21 @@ def _recent_form_rate(row: pd.Series) -> float:
     return sum(row.get(k, 0.0) * w for k, w in RECENT_FORM_WEIGHTS.items())
 
 
+def form_shrink(season_hr) -> float:
+    """How far to trust a hitter's hot/cold streak, by tier (see FORM_SHRINK)."""
+    try:
+        hr = float(season_hr)
+    except (TypeError, ValueError):
+        return FORM_SHRINK_DEFAULT
+    if hr != hr:
+        return FORM_SHRINK_DEFAULT
+    if hr >= 18:
+        return FORM_SHRINK["star"]
+    if hr >= 8:
+        return FORM_SHRINK["mid"]
+    return FORM_SHRINK["under"]
+
+
 def expected_hr(row: pd.Series) -> tuple[float, float, float]:
     """Season expected HR from batted-ball quality. Returns (xhr/PA, xHR, HR-xHR).
 
@@ -383,6 +410,10 @@ def score_row(row: pd.Series) -> dict:
     if trend_pts:
         recent_form_score = float(np.clip(
             recent_form_score + float(np.clip(trend_pts, -12.0, 12.0)), 0, 100))
+    # Shrink the streak toward neutral by tier — a star's hot week says almost
+    # nothing about tonight, an under-the-radar bat's says more.
+    _shrink = form_shrink(row.get("season_hr"))
+    recent_form_score = float(np.clip(50.0 + (recent_form_score - 50.0) * _shrink, 0, 100))
     k_score = scale(row.get("k_pct"), *REF["k_pct"])  # high = strikeout-prone
     # Swing-and-miss (whiff) rate: high = more boom-or-bust, lower contact floor.
     # Fall back to the K% signal when whiff isn't available.

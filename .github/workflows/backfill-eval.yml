@@ -15,6 +15,11 @@ on:
         description: "How many days back to grade"
         required: false
         default: "30"
+      regrade:
+        description: "Re-grade dates already logged (needed after a feature fix)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -45,7 +50,9 @@ jobs:
           DATE="${{ github.event.inputs.end_date || '' }}"
           DAYS="${{ github.event.inputs.days || '30' }}"
           if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
-          python scripts/backfill_eval.py "$DATE" "$DAYS"
+          REGRADE=""
+          if [ "${{ github.event.inputs.regrade }}" = "true" ]; then REGRADE="--regrade"; fi
+          python scripts/backfill_eval.py "$DATE" "$DAYS" $REGRADE
 
       - name: Refresh the lineup HR log from the graded record
         run: |

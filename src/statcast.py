@@ -423,6 +423,14 @@ def _statcast_range(end_date_iso: str, lookback_days: int = 30):
         return None
     sc = sc.copy()
     sc["game_date"] = pd.to_datetime(sc["game_date"], errors="coerce").dt.date
+    # STRICTLY exclude the target date. When grading/backfilling a past day the
+    # game has already been played, so leaving it in would let that day's own
+    # home run count toward its own "recent form" feature — target leakage that
+    # inflates every recent-form weight the model learns. Today's slate has no
+    # rows yet, so this is a no-op live.
+    sc = sc[sc["game_date"] < end]
+    if sc.empty:
+        return None
     if "pitch_type" in sc.columns:
         sc["pitch_family"] = sc["pitch_type"].map(_PITCH_FAMILY)
     return sc
@@ -444,7 +452,7 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
 
     def _window(days: int) -> pd.DataFrame:
         cutoff = end - dt.timedelta(days=days)
-        w = pa_rows[pa_rows["game_date"] > cutoff]
+        w = pa_rows[(pa_rows["game_date"] > cutoff) & (pa_rows["game_date"] < end)]
         grp = w.groupby("batter")
         pa = grp.size().rename("pa")
         hr = w.assign(is_hr=(w["events"] == "home_run")).groupby("batter")["is_hr"].sum().rename("hr")
@@ -467,7 +475,7 @@ def get_recent_form_table(end_date_iso: str) -> pd.DataFrame:
         bbe = bbe[bbe["launch_speed"].notna()] if "launch_speed" in bbe.columns else bbe
         if not bbe.empty and "barrel" in bbe.columns:
             cutoff14 = end - dt.timedelta(days=14)
-            recent = bbe[bbe["game_date"] > cutoff14]
+            recent = bbe[(bbe["game_date"] > cutoff14) & (bbe["game_date"] < end)]
             xw_col = ("estimated_woba_using_speedangle"
                       if "estimated_woba_using_speedangle" in bbe.columns else None)
             r = recent.groupby("batter")
@@ -535,6 +543,12 @@ def get_pitcher_bvp_table(pitcher_id, end_date_iso: str, seasons_back: int = 4) 
     except Exception as exc:
         note_diag("bvp (Statcast pitcher history)", exc)
         return pd.DataFrame()
+    # Career BvP must stop the day BEFORE the game being scored — otherwise a
+    # graded day's own HR off this starter lands in its own "he owns this guy"
+    # feature. No-op for live slates (the game hasn't been played).
+    if sc is not None and not sc.empty and "game_date" in sc.columns:
+        gd = pd.to_datetime(sc["game_date"], errors="coerce").dt.date
+        sc = sc[gd < end]
     return bvp_counts(sc)
 
 
