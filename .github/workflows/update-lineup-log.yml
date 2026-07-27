@@ -48,6 +48,13 @@ jobs:
       - name: Daily self-improvement (grade yesterday + retune)
         run: python scripts/daily_improve.py || echo "daily improve skipped"
 
+      - name: Grade the score predictor against real final scores
+        run: |
+          DATE="${{ github.event.inputs.date || '' }}"
+          LOOKBACK="${{ github.event.inputs.lookback || '3' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
+          python scripts/grade_games.py "$DATE" "$LOOKBACK" || echo "game grading skipped"
+
       - name: Update the lineup HR log (from the real graded record)
         run: |
           DATE="${{ github.event.inputs.date || '' }}"
@@ -59,7 +66,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/lineup_hr_log.csv data/eval_log.csv data/model_tuning.json 2>/dev/null || true
+          git add data/lineup_hr_log.csv data/eval_log.csv data/model_tuning.json data/game_eval_log.csv 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
