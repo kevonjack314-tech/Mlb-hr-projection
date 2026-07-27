@@ -54,6 +54,12 @@ keeps the lineup HR log fresh.
    score + book edge), and **Top 3 Longshots** (🎯 under-the-radar ceiling), as
    cards with odds, tier, Barrel% / Hard-Hit% / FB% / HR-FB / Max EV and the
    model's rationale. No player appears twice across the three lists.
+0b. **🔮 Score Predictor** (🎯 Picks → Score Predictor) — a **projected final
+   score for every game on the slate**, plus a **⭐ Game of the Day** (also shown
+   on the 🏠 Today tab). Each game gets expected runs per side, a most-likely
+   total, win probability with vig-free fair odds, an Over/Under read on the
+   line, and the HR model's favorite bat in that game. See
+   [Score prediction](#score-prediction-projected-final-scores).
 1. **🚀 Best Longshots** — high-upside, boom-or-bust bats ranked by an
    *explosiveness* score (max EV + barrel% + favorable park/weather). Good for
    +EV HR props and DFS tournaments. Includes vig-free fair odds.
@@ -448,6 +454,58 @@ pitcher faced with a platoon advantage is the juiciest matchup.
 - **Humidity** — a small second-order carry effect (humid air is slightly less
   dense).
 
+### Score prediction (projected final scores)
+
+`src/gamescore.py` projects a **final score for every game** from data the HR
+model already pulls — nothing extra is fetched. Per side:
+
+```
+posted lineup -> PA-weighted xwOBA -> runs above/below league average
+  x opposing starter   (HR/9, barrel% allowed, velo off his own baseline)
+  x opposing bullpen   (the ~42% of innings the starter won't cover)
+  x park RUN factor    (NOT the HR factor)
+  x weather            (the HR weather model, damped to runs)
+                                                        = expected runs
+```
+
+**Lineup quality is PA-weighted by batting order.** The leadoff spot gets ~22%
+more trips than the 9-hole (`SPOT_PA_SHARE`), so the same .380-xwOBA bat is
+worth measurably more hitting first than seventh.
+
+**Runs, not home runs.** Park **run** factors are a separate bundled column
+(`run_factor` in `data/park_factors.csv`) and they deliberately disagree with the
+HR factors, because the two questions are different:
+
+| Park | HR factor | Run factor | Why they split |
+|---|---|---|---|
+| Fenway (BOS) | **96** (90 vs RHB) | **108** | The Monster turns fly balls into doubles |
+| Kauffman (KC) | **92** | **105** | Suppresses HR; all that grass is doubles/triples |
+| Yankee Stadium | **110** (121 vs LHB) | **101** | The short porch is a HR effect, not a runs effect |
+| Coors (COL) | **114** | **128** | Both — carry *and* the biggest outfield in baseball |
+
+**Scoring is not Poisson.** Innings are correlated (rallies), so real team-game
+scoring has much fatter tails than a coin-flip model assumes. Runs go through a
+**negative binomial** with `RUN_DISPERSION = 2.2`, which reproduces the real
+variance (9.72 vs ~9.7) and the P(≤2 runs) shape (0.30 vs ~0.29). Poisson would
+say a 4.45-run offense gets shut out 1.1% of the time; the real number is ~7%.
+
+The two distributions are convolved to give **win probability**, the full
+**total-runs distribution**, and an **Over/Under** read on any line. Regulation
+ties break by extra innings *in proportion to each side's scoring rate* — the
+better offense wins more extra-inning games — with the home team's last-at-bat
+edge folded in. Fair odds carry **no vig**, so an edge only exists when the book
+hangs a longer price than the fair number.
+
+**Slate re-centering.** If the feed only resolves the bats it has Statcast rows
+for, every posted lineup reads ~.340 xwOBA and every game projects as a 12-run
+track meet. Twenty teams are not all above average on the same night — that's a
+coverage artifact — so the slate is re-centered on the league and the model runs
+on **relative** lineup strength (`center_to_league=True`).
+
+**⭐ Game of the Day** scores side edge and total edge together, damped by how
+much of the projection is built on real posted lineups and real starter
+peripherals, so a big projected margin off two half-filled lineups can't win it.
+
 ### 5. Trailing-month backtest & profile matching
 
 The **HR Trends & Backtest** tab gathers every HR in a date window (default ~30
@@ -527,9 +585,10 @@ modeled slates so the whole analysis runs without network.
 ├── app.py                  # Streamlit UI: tabs, filters, charts, CSV export
 ├── requirements.txt
 ├── data/
-│   └── park_factors.csv    # 30-park HR factors, dimensions, lat/lon, roof
+│   └── park_factors.csv    # 30-park HR + RUN factors, dimensions, lat/lon, roof
 ├── src/
-│   ├── parks.py            # park / wind / temp / humidity multipliers
+│   ├── parks.py            # park HR + RUN factors, wind / temp / humidity
+│   ├── gamescore.py        # projected final scores, win prob, totals, GOTD
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls

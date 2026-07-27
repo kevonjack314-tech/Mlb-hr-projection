@@ -231,6 +231,31 @@ def humidity_hr_multiplier(humidity_pct: float | None, altitude_ft: float = 0.0)
 # --------------------------------------------------------------------------- #
 # HR environment (park + weather + opposing starter)
 # --------------------------------------------------------------------------- #
+def park_run_multiplier(team_abbr: str) -> float:
+    """RUN park multiplier centered at 1.0 — deliberately NOT the HR factor.
+
+    Runs and home runs are different park questions and the two tables disagree
+    on purpose. Fenway suppresses home runs (96) but is one of the best RUN
+    parks in baseball (108) because the Monster turns fly balls into doubles.
+    Yankee Stadium is the reverse: the short porch makes it a 110 HR park but
+    only a 101 run park, because everything that isn't pulled in the air dies in
+    the big left-center gap. Kauffman is a 92 HR park and a 105 run park — all
+    that outfield grass is triples. Coors is both, and then some.
+    """
+    park = get_park(team_abbr)
+    if park is None:
+        return 1.0
+    rf = park.get("run_factor")
+    try:
+        rf = float(rf)
+    except (TypeError, ValueError):
+        rf = None
+    if rf is None or rf != rf:
+        # Fall back to a damped HR factor — runs move less than home runs do.
+        rf = 100.0 + 0.55 * (float(park.get("hr_factor", 100)) - 100.0)
+    return float(rf) / 100.0
+
+
 def _val(row, key):
     v = row.get(key)
     try:

@@ -717,6 +717,116 @@ def tab_by_matchup(df: pd.DataFrame):
                        key="dl_top2_team")
 
 
+def _score_card(row: pd.Series, headline: bool = False) -> None:
+    """One game's projected final score, win probability and total."""
+    away, home = row["away_team"], row["home_team"]
+    ar, hr_ = float(row["away_runs_exp"]), float(row["home_runs_exp"])
+    fav_home = row["winner"] == home
+    a_style = "font-weight:700" if not fav_home else "opacity:0.7"
+    h_style = "font-weight:700" if fav_home else "opacity:0.7"
+    size = "1.7em" if headline else "1.25em"
+    st.markdown(
+        f"<div style='font-size:{size};line-height:1.35'>"
+        f"<span style='{a_style}'>{away} {ar:.1f}</span>"
+        f"<span style='opacity:0.5'> &nbsp;–&nbsp; </span>"
+        f"<span style='{h_style}'>{home} {hr_:.1f}</span></div>"
+        f"<div style='opacity:0.75;font-size:0.9em'>"
+        f"projected total <b>{float(row['total_exp']):.1f}</b> · most likely "
+        f"<b>{int(row['most_likely_total'])}</b> runs · "
+        f"{row['winner']} <b>{float(row['win_prob'])*100:.0f}%</b> "
+        f"({int(row['fair_odds']):+d} fair) · {row['total_lean']} "
+        f"{row['total_line']} at {float(row['total_lean_prob'])*100:.0f}%</div>",
+        unsafe_allow_html=True)
+
+
+def tab_game_scores(df: pd.DataFrame):
+    """Projected final score for every game, plus the game I like most."""
+    from src.gamescore import (
+        attach_top_bat, best_bets, game_of_the_day, predict_games,
+    )
+    st.subheader("🔮 Score Predictor — every game")
+    st.caption(
+        "A projected **final score for every game on the slate**, built from the "
+        "same data the HR model runs on: each posted lineup's PA-weighted xwOBA "
+        "(the leadoff spot gets ~22% more trips than the 9-hole, so spot "
+        "matters), the opposing starter's HR/9 and barrel% allowed, the "
+        "opposing bullpen for the innings the starter won't cover, the park's "
+        "**run** factor — *not* its HR factor — and the weather. Runs then go "
+        "through a negative-binomial distribution, because real scoring has far "
+        "fatter tails than a coin-flip model assumes."
+    )
+    if df.empty or "game" not in df.columns:
+        st.warning("No games on the slate.")
+        return
+
+    games = attach_top_bat(predict_games(df), df)
+    if games.empty:
+        st.warning("Not enough lineup data to project scores yet.")
+        return
+
+    gotd = game_of_the_day(games)
+    if gotd is not None:
+        with st.container(border=True):
+            st.markdown("### ⭐ Game of the Day")
+            _score_card(gotd, headline=True)
+            st.markdown(f"**My play: {gotd['gotd_bet']}**")
+            st.caption(f"💡 {gotd['rationale']}")
+            if gotd.get("top_bat"):
+                st.caption(f"⚾ Best HR bat in this game: **{gotd['top_bat']}** "
+                           f"({gotd.get('top_bat_team','')}) — "
+                           f"{gotd.get('top_bat_hr_pct','?')}% to go deep")
+
+    st.markdown("#### 🎯 The three games I like most")
+    picks = best_bets(games, 3)
+    cols = st.columns(len(picks)) if len(picks) else []
+    for col, (_, row) in zip(cols, picks.iterrows()):
+        with col, st.container(border=True):
+            st.markdown(f"**{row['game']}**")
+            _score_card(row)
+            st.markdown(f"🏆 {row['pick']}  \n📊 {row['total_pick']}")
+            st.caption(f"confidence {float(row['confidence']):.0f}/100")
+
+    st.markdown("#### 📋 Full board")
+    for _, row in games.iterrows():
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 2])
+            with c1:
+                st.markdown(f"**{row['game']}**")
+                _score_card(row)
+            with c2:
+                st.markdown(
+                    f"<div style='font-size:0.85em;opacity:0.8'>"
+                    f"Lineups (xwOBA): {row['away_team']} "
+                    f"<b>{row['away_lineup_xwoba']:.3f}</b> · {row['home_team']} "
+                    f"<b>{row['home_lineup_xwoba']:.3f}</b><br>"
+                    f"Park runs <b>{float(row['park_run_mult']):.2f}x</b> · "
+                    f"weather <b>{float(row['weather_run_mult']):.2f}x</b><br>"
+                    f"Confidence <b>{float(row['confidence']):.0f}</b>/100 · "
+                    f"data {float(row.get('data_quality_pct', 0)):.0f}%"
+                    + (f"<br>⚾ top HR bat: <b>{row['top_bat']}</b>"
+                       if row.get("top_bat") else "")
+                    + "</div>", unsafe_allow_html=True)
+
+    export_cols = [c for c in ["game", "away_team", "home_team", "away_runs_exp",
+                               "home_runs_exp", "total_exp", "most_likely_total",
+                               "winner", "win_prob", "fair_odds", "total_line",
+                               "p_over", "p_under", "total_lean", "confidence",
+                               "away_lineup_xwoba", "home_lineup_xwoba",
+                               "park_run_mult", "weather_run_mult", "top_bat"]
+                   if c in games.columns]
+    st.download_button("⬇️ Export projected scores to CSV",
+                       games[export_cols].to_csv(index=False).encode(),
+                       file_name="projected_scores.csv", mime="text/csv",
+                       key="dl_game_scores")
+    st.caption(
+        "Win probability comes from convolving the two run distributions; "
+        "regulation ties are broken by extra innings in proportion to each "
+        "side's scoring rate. Fair odds carry **no vig** — a book's price on "
+        "the same side will be worse, so an edge only exists when the book is "
+        "longer than the fair number shown."
+    )
+
+
 def tab_top3(df: pd.DataFrame):
     """The daily shortlist: top 3 HR picks, top 3 value plays, top 3 longshots."""
     from src.parlay import enrich
@@ -1800,6 +1910,31 @@ def render_hr_of_day(df):
         pass
 
 
+def render_game_of_the_day(df):
+    """My single favorite game on the board — score, side, total, and why."""
+    from src.gamescore import attach_top_bat, game_of_the_day, predict_games
+    if df is None or df.empty or "game" not in df.columns:
+        return
+    games = attach_top_bat(predict_games(df), df)
+    row = game_of_the_day(games)
+    if row is None:
+        return
+    with st.container(border=True):
+        st.markdown("### ⭐ Game of the Day")
+        c1, c2 = st.columns([3, 2])
+        with c1:
+            _score_card(row, headline=True)
+            st.caption(f"💡 {row['rationale']}")
+        with c2:
+            st.metric("My play", row["gotd_bet"],
+                      f"{'side' if row['gotd_angle']=='side' else 'total'} edge")
+            if row.get("top_bat"):
+                st.caption(f"⚾ Best HR bat in it: **{row['top_bat']}** "
+                           f"({row.get('top_bat_team','')}) — "
+                           f"{row.get('top_bat_hr_pct','?')}%")
+    st.caption("Full board in **🎯 Picks → 🔮 Score Predictor**.")
+
+
 def render_top_picks(df):
     """At-a-glance hero cards: top pick, safest, best value, and a quick parlay."""
     if df.empty:
@@ -2013,19 +2148,27 @@ def main():
     with t_today:
         render_hr_of_day(filtered)
         st.markdown("")
+        render_game_of_the_day(scored)
+        st.markdown("")
         render_top_picks(filtered)
         st.caption("Head to **🎯 Picks → 🏆 Top 3** for the daily shortlist (top 3 HR "
-                   "picks / value plays / longshots), **🎰 Parlays** to build "
+                   "picks / value plays / longshots), **🔮 Score Predictor** for a "
+                   "projected final score in every game, **🎰 Parlays** to build "
                    "tickets, **🧾 Lineups** for today's orders, **📚 History** for "
                    "previous HRs & trends.")
     with t_picks:
         view = st.radio(
-            "View", ["🏆 Top 3", "⚔️ Top 2 by Team", "🚀 Longshots", "🎯 Consistent",
-                     "🕵️ Sneaky", "💎 Value Finder", "📊 Full Board"],
+            "View", ["🏆 Top 3", "🔮 Score Predictor", "⚔️ Top 2 by Team",
+                     "🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
+                     "💎 Value Finder", "📊 Full Board"],
             horizontal=True, label_visibility="collapsed", key="picks_view",
         )
         if view == "🏆 Top 3":
             tab_top3(filtered)
+        elif view == "🔮 Score Predictor":
+            # Deliberately the UNFILTERED slate — a score projection needs the
+            # whole batting order, not just the bats that survived the filters.
+            tab_game_scores(scored)
         elif view == "⚔️ Top 2 by Team":
             tab_by_matchup(filtered)
         elif view == "🚀 Longshots":
