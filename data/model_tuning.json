@@ -1,84 +1,84 @@
 {
-  "n": 9943,
-  "bins": [
-    {
-      "pred": 0.0449,
-      "actual": 0.0024
-    },
-    {
-      "pred": 0.0725,
-      "actual": 0.0217
-    },
-    {
-      "pred": 0.0883,
-      "actual": 0.0451
-    },
-    {
-      "pred": 0.1097,
-      "actual": 0.078
-    },
-    {
-      "pred": 0.1353,
-      "actual": 0.1248
-    },
-    {
-      "pred": 0.1522,
-      "actual": 0.1609
-    },
-    {
-      "pred": 0.177,
-      "actual": 0.206
-    },
-    {
-      "pred": 0.248,
-      "actual": 0.2864
-    }
-  ],
-  "brier": 0.09476,
-  "updated": "2026-07-26",
-  "role_factors": {
-    "Anchor": 1.014,
-    "Longshot": 0.94,
-    "Value": 1.082
+ "n": 10213,
+ "bins": [
+  {
+   "pred": 0.0442,
+   "actual": 0.007
   },
-  "role_n": {
-    "Anchor": 41,
-    "Longshot": 40,
-    "Value": 42
+  {
+   "pred": 0.072,
+   "actual": 0.0235
   },
-  "feature_model": {
-    "n": 0,
-    "active": false,
-    "leakage": {
-      "hr_rate_7": {
-        "zero_rate_hr": 0.002,
-        "zero_rate_no_hr": 0.6289,
-        "mean_hr": 0.09435,
-        "mean_no_hr": 0.02539,
-        "leaked": true
-      },
-      "hr_rate_15": {
-        "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.3769,
-        "mean_hr": 0.06687,
-        "mean_no_hr": 0.0293,
-        "leaked": true
-      },
-      "hr_rate_30": {
-        "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.2099,
-        "mean_hr": 0.05388,
-        "mean_no_hr": 0.03036,
-        "leaked": true
-      },
-      "recent_form_score": {
-        "zero_rate_hr": 0.0,
-        "zero_rate_no_hr": 0.3809,
-        "mean_hr": 76.50212,
-        "mean_no_hr": 26.95066,
-        "leaked": true
-      }
-    },
-    "note": "DISABLED \u2014 fit on a graded record with target leakage in the recent-form windows; regrade with the fixed windows to re-enable"
+  {
+   "pred": 0.0881,
+   "actual": 0.0455
+  },
+  {
+   "pred": 0.1095,
+   "actual": 0.0767
+  },
+  {
+   "pred": 0.1353,
+   "actual": 0.1254
+  },
+  {
+   "pred": 0.1524,
+   "actual": 0.159
+  },
+  {
+   "pred": 0.178,
+   "actual": 0.2069
+  },
+  {
+   "pred": 0.2486,
+   "actual": 0.2835
   }
+ ],
+ "brier": 0.09514,
+ "updated": "2026-07-27",
+ "role_factors": {
+  "Anchor": 1.012,
+  "Longshot": 0.94,
+  "Value": 1.095
+ },
+ "role_n": {
+  "Anchor": 42,
+  "Longshot": 40,
+  "Value": 44
+ },
+ "feature_model": {
+  "n": 0,
+  "active": false,
+  "leakage": {
+   "hr_rate_7": {
+    "zero_rate_hr": 0.0244,
+    "zero_rate_no_hr": 0.6293,
+    "mean_hr": 0.09209,
+    "mean_no_hr": 0.02545,
+    "leaked": true
+   },
+   "hr_rate_15": {
+    "zero_rate_hr": 0.0166,
+    "zero_rate_no_hr": 0.3803,
+    "mean_hr": 0.06554,
+    "mean_no_hr": 0.02925,
+    "leaked": true
+   },
+   "hr_rate_30": {
+    "zero_rate_hr": 0.0049,
+    "zero_rate_no_hr": 0.211,
+    "mean_hr": 0.05342,
+    "mean_no_hr": 0.03036,
+    "leaked": true
+   },
+   "recent_form_score": {
+    "zero_rate_hr": 0.0,
+    "zero_rate_no_hr": 0.3699,
+    "mean_hr": 75.1799,
+    "mean_no_hr": 27.23407,
+    "leaked": true
+   }
+  },
+  "note": "DISABLED \u2014 target leakage in the graded record (hr_rate_7, hr_rate_15, hr_rate_30, recent_form_score); regrade those dates before trusting learned weights"
+ }
 }
