@@ -1,82 +1,96 @@
 {
- "n": 10213,
+ "n": 10437,
  "bins": [
   {
-   "pred": 0.0442,
-   "actual": 0.007
+   "pred": 0.0437,
+   "actual": 0.0115
   },
   {
-   "pred": 0.072,
-   "actual": 0.0235
+   "pred": 0.0717,
+   "actual": 0.0222
   },
   {
-   "pred": 0.0881,
-   "actual": 0.0455
+   "pred": 0.0879,
+   "actual": 0.0452
   },
   {
    "pred": 0.1095,
-   "actual": 0.0767
+   "actual": 0.0766
   },
   {
-   "pred": 0.1353,
-   "actual": 0.1254
+   "pred": 0.1354,
+   "actual": 0.1235
   },
   {
-   "pred": 0.1524,
-   "actual": 0.159
+   "pred": 0.1526,
+   "actual": 0.1617
   },
   {
-   "pred": 0.178,
-   "actual": 0.2069
+   "pred": 0.179,
+   "actual": 0.2078
   },
   {
-   "pred": 0.2486,
-   "actual": 0.2835
+   "pred": 0.2495,
+   "actual": 0.2774
   }
  ],
- "brier": 0.09514,
- "updated": "2026-07-27",
+ "brier": 0.09518,
+ "updated": "2026-07-28",
  "role_factors": {
-  "Anchor": 1.012,
+  "Anchor": 1.009,
   "Longshot": 0.94,
-  "Value": 1.095
+  "Value": 1.1
  },
  "role_n": {
-  "Anchor": 42,
+  "Anchor": 43,
   "Longshot": 40,
-  "Value": 44
+  "Value": 46
  },
  "feature_model": {
   "n": 0,
   "active": false,
   "leakage": {
    "hr_rate_7": {
-    "zero_rate_hr": 0.0244,
-    "zero_rate_no_hr": 0.6293,
-    "mean_hr": 0.09209,
-    "mean_no_hr": 0.02545,
+    "zero_rate_hr": 0.0372,
+    "zero_rate_no_hr": 0.6303,
+    "mean_hr": 0.09074,
+    "mean_no_hr": 0.02539,
     "leaked": true
    },
    "hr_rate_15": {
-    "zero_rate_hr": 0.0166,
-    "zero_rate_no_hr": 0.3803,
-    "mean_hr": 0.06554,
-    "mean_no_hr": 0.02925,
+    "zero_rate_hr": 0.0219,
+    "zero_rate_no_hr": 0.3828,
+    "mean_hr": 0.06504,
+    "mean_no_hr": 0.02926,
     "leaked": true
    },
    "hr_rate_30": {
-    "zero_rate_hr": 0.0049,
-    "zero_rate_no_hr": 0.211,
-    "mean_hr": 0.05342,
-    "mean_no_hr": 0.03036,
+    "zero_rate_hr": 0.0076,
+    "zero_rate_no_hr": 0.2109,
+    "mean_hr": 0.05329,
+    "mean_no_hr": 0.03041,
     "leaked": true
    },
    "recent_form_score": {
     "zero_rate_hr": 0.0,
-    "zero_rate_no_hr": 0.3699,
-    "mean_hr": 75.1799,
-    "mean_no_hr": 27.23407,
+    "zero_rate_no_hr": 0.3613,
+    "mean_hr": 74.50353,
+    "mean_no_hr": 27.41933,
     "leaked": true
+   },
+   "barrel_pct_14": {
+    "zero_rate_hr": 0.0,
+    "zero_rate_no_hr": 0.0,
+    "mean_hr": 10.64314,
+    "mean_no_hr": 10.0499,
+    "leaked": false
+   },
+   "xwoba_14": {
+    "zero_rate_hr": 0.0,
+    "zero_rate_no_hr": 0.0,
+    "mean_hr": 0.35098,
+    "mean_no_hr": 0.34441,
+    "leaked": false
    }
   },
   "note": "DISABLED \u2014 target leakage in the graded record (hr_rate_7, hr_rate_15, hr_rate_30, recent_form_score); regrade those dates before trusting learned weights"
