@@ -1,95 +1,95 @@
 {
- "n": 10437,
+ "n": 10720,
  "bins": [
   {
-   "pred": 0.0437,
-   "actual": 0.0115
+   "pred": 0.0435,
+   "actual": 0.0142
   },
   {
-   "pred": 0.0717,
-   "actual": 0.0222
+   "pred": 0.0714,
+   "actual": 0.0216
   },
   {
-   "pred": 0.0879,
-   "actual": 0.0452
+   "pred": 0.0878,
+   "actual": 0.044
   },
   {
-   "pred": 0.1095,
-   "actual": 0.0766
+   "pred": 0.1094,
+   "actual": 0.0776
   },
   {
-   "pred": 0.1354,
-   "actual": 0.1235
+   "pred": 0.1355,
+   "actual": 0.1254
   },
   {
-   "pred": 0.1526,
-   "actual": 0.1617
+   "pred": 0.1529,
+   "actual": 0.156
   },
   {
-   "pred": 0.179,
-   "actual": 0.2078
+   "pred": 0.1802,
+   "actual": 0.2082
   },
   {
-   "pred": 0.2495,
-   "actual": 0.2774
+   "pred": 0.25,
+   "actual": 0.2724
   }
  ],
- "brier": 0.09518,
- "updated": "2026-07-28",
+ "brier": 0.09479,
+ "updated": "2026-07-29",
  "role_factors": {
-  "Anchor": 1.009,
+  "Anchor": 1.014,
   "Longshot": 0.94,
-  "Value": 1.1
+  "Value": 1.096
  },
  "role_n": {
-  "Anchor": 43,
+  "Anchor": 44,
   "Longshot": 40,
-  "Value": 46
+  "Value": 48
  },
  "feature_model": {
   "n": 0,
   "active": false,
   "leakage": {
    "hr_rate_7": {
-    "zero_rate_hr": 0.0372,
-    "zero_rate_no_hr": 0.6303,
-    "mean_hr": 0.09074,
-    "mean_no_hr": 0.02539,
+    "zero_rate_hr": 0.0475,
+    "zero_rate_no_hr": 0.6315,
+    "mean_hr": 0.08933,
+    "mean_no_hr": 0.02538,
     "leaked": true
    },
    "hr_rate_15": {
-    "zero_rate_hr": 0.0219,
-    "zero_rate_no_hr": 0.3828,
-    "mean_hr": 0.06504,
-    "mean_no_hr": 0.02926,
+    "zero_rate_hr": 0.0289,
+    "zero_rate_no_hr": 0.3855,
+    "mean_hr": 0.06424,
+    "mean_no_hr": 0.02929,
     "leaked": true
    },
    "hr_rate_30": {
-    "zero_rate_hr": 0.0076,
-    "zero_rate_no_hr": 0.2109,
-    "mean_hr": 0.05329,
-    "mean_no_hr": 0.03041,
+    "zero_rate_hr": 0.0103,
+    "zero_rate_no_hr": 0.2113,
+    "mean_hr": 0.05303,
+    "mean_no_hr": 0.03047,
     "leaked": true
    },
    "recent_form_score": {
-    "zero_rate_hr": 0.0,
-    "zero_rate_no_hr": 0.3613,
-    "mean_hr": 74.50353,
-    "mean_no_hr": 27.41933,
+    "zero_rate_hr": 0.0009,
+    "zero_rate_no_hr": 0.3512,
+    "mean_hr": 73.76198,
+    "mean_no_hr": 27.66672,
     "leaked": true
    },
    "barrel_pct_14": {
     "zero_rate_hr": 0.0,
     "zero_rate_no_hr": 0.0,
-    "mean_hr": 10.64314,
-    "mean_no_hr": 10.0499,
+    "mean_hr": 10.59286,
+    "mean_no_hr": 10.04075,
     "leaked": false
    },
    "xwoba_14": {
     "zero_rate_hr": 0.0,
     "zero_rate_no_hr": 0.0,
-    "mean_hr": 0.35098,
-    "mean_no_hr": 0.34441,
+    "mean_hr": 0.35018,
+    "mean_no_hr": 0.34452,
     "leaked": false
    }
   },
