@@ -53,7 +53,7 @@ jobs:
           DATE="${{ github.event.inputs.date || '' }}"
           LOOKBACK="${{ github.event.inputs.lookback || '3' }}"
           if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
-          python scripts/grade_games.py "$DATE" "$LOOKBACK" || echo "game grading skipped"
+          python scripts/grade_games.py "$DATE" "$LOOKBACK" --minutes=20 || echo "game grading skipped"
 
       - name: Update the lineup HR log (from the real graded record)
         run: |

@@ -163,6 +163,11 @@ def fit_calibration(log: pd.DataFrame) -> dict:
     out = {"n": 0, "bins": [], "brier": None, "updated": None}
     if log is None or log.empty:
         return out
+    log, drop_note = clean_log(log)
+    if drop_note:
+        out["excluded"] = drop_note
+    if log.empty:
+        return out
     df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
     out["n"] = int(len(df))
     out["brier"] = brier_score(df)
@@ -194,6 +199,7 @@ def fit_role_factors(log: pd.DataFrame) -> dict:
     what has really been cashing.
     """
     out = {"role_factors": {}, "role_n": {}}
+    log, _ = clean_log(log)
     if log is None or log.empty or "parlay_role" not in log.columns:
         return out
     legs = log[log["parlay_role"].astype(str).isin(["Anchor", "Value", "Longshot"])]
@@ -304,6 +310,70 @@ LEAKY_CANDIDATES = ("hr_rate_7", "hr_rate_15", "hr_rate_30", "recent_form_score"
                     "barrel_pct_14", "xwoba_14", "bvp_hr")
 
 
+def leaked_dates(log: pd.DataFrame, min_hr_games: int = 5,
+                 min_zero_share: float = 0.20) -> set:
+    """Which graded DATES carry the leaked feature windows.
+
+    Per-date rather than all-or-nothing, because a record gets fixed one day at
+    a time: once the windows were corrected, newly graded days are clean while
+    every older day still carries the bug. Judging the whole log would either
+    throw away good days or trust bad ones.
+
+    The test is the same tell as `leakage_report`, applied per date: among that
+    day's home runs, what share of hitters show a 0 in their prior-7-day
+    window? Honest days land near 40-60% (plenty of home runs are a hitter's
+    first in a week); leaked days sit near zero. Dates with too few home runs
+    to judge are kept — they are too small to move a fit either way.
+    """
+    if log is None or log.empty or "date" not in log.columns:
+        return set()
+    if "hr_rate_7" not in log.columns or "hit_hr" not in log.columns:
+        return set()
+    v = pd.to_numeric(log["hr_rate_7"], errors="coerce")
+    y = pd.to_numeric(log["hit_hr"], errors="coerce")
+    d = pd.DataFrame({"date": log["date"], "v": v, "y": y}).dropna()
+    hits, misses = d[d["y"] == 1], d[d["y"] == 0]
+    if hits.empty or misses.empty:
+        return set()
+    grp = hits.groupby("date")["v"]
+    counts, zero_share = grp.size(), grp.apply(lambda s: float((s == 0).mean()))
+    # The zero-rate test only means something if zeros occur AT ALL on that
+    # date. A feed that never emits an exact 0 (a filled or smoothed window)
+    # would otherwise look leaked everywhere and silently delete the entire
+    # training set — a far worse failure than the bug being detected. So a date
+    # is only judged when its NON-HR games show plenty of zeros to compare to.
+    miss_zero = misses.groupby("date")["v"].apply(lambda s: float((s == 0).mean()))
+    judgeable = miss_zero.reindex(zero_share.index).fillna(0.0) >= min_zero_share
+    bad = zero_share[(counts >= min_hr_games) & judgeable
+                     & (zero_share < min_zero_share)]
+    return set(bad.index)
+
+
+def clean_log(log: pd.DataFrame) -> tuple:
+    """Drop leaked dates before any fit. Returns (clean_log, note_or_None).
+
+    Every learned artefact — the calibration curve, the role factors and the
+    feature model — trains on this. The calibration curve in particular touches
+    every live probability, so leaving it fit on contaminated rows would keep
+    the bug in production long after the windows themselves were fixed.
+    """
+    if log is None or log.empty:
+        return log, None
+    bad = leaked_dates(log)
+    if not bad:
+        return log, None
+    kept = log[~log["date"].isin(bad)]
+    note = (f"excluded {len(bad)} leaked date(s) / {len(log) - len(kept)} rows "
+            f"— regrade them to put the data back in play")
+    return kept, note
+
+# A note on dates whose Statcast pull failed outright: every hr_rate_7 is NaN,
+# so `leaked_dates` can't judge them and keeps them. That is the right call —
+# a row with no recent-form feature at all cannot have leaked one, and its
+# prediction/outcome pair is still perfectly good for calibration. Those rows
+# are separately filtered out of the FEATURE model by the coverage threshold.
+
+
 def leakage_report(log: pd.DataFrame) -> dict:
     """Detect target leakage in the graded record's rolling-window features.
 
@@ -366,13 +436,15 @@ def fit_feature_model(log: pd.DataFrame) -> dict:
     # Refuse to learn from a leaked record. A model fit on rows whose recent-form
     # window contains the game's own home run will always "beat" the hand model
     # on a holdout that leaks the same way — it validates itself into production.
+    log, drop_note = clean_log(log)
     leak = leakage_report(log)
-    if leak["leaked"]:
+    if leak["leaked"] or log.empty:
         bad = ", ".join(k for k, v in leak["features"].items() if v["leaked"])
         out["feature_model"] = {
             "n": 0, "active": False, "leakage": leak["features"],
-            "note": f"DISABLED — target leakage in the graded record ({bad}); "
-                    f"regrade those dates before trusting learned weights"}
+            "note": f"DISABLED — target leakage in the graded record "
+                    f"({bad or 'no clean dates left'}); regrade those dates "
+                    f"before trusting learned weights"}
         return out
 
     df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
