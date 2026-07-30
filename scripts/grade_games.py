@@ -6,7 +6,7 @@ scores it against the actual line score from MLB StatsAPI. Appends to
 data/game_eval_log.csv (de-duped by date+game) and prints the record.
 
 Usage:
-    python scripts/grade_games.py [END_DATE] [DAYS] [--regrade]
+    python scripts/grade_games.py [END_DATE] [DAYS] [--regrade] [--minutes=N]
 
 Defaults: END_DATE = yesterday (UTC), DAYS = 1. Dates already in the log are
 skipped unless --regrade is passed. Needs live network (GitHub Actions runners
@@ -15,6 +15,7 @@ have it; sandboxes may not).
 import datetime as dt
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -31,6 +32,9 @@ def main() -> None:
            else dt.date.today() - dt.timedelta(days=1))
     days = int(argv[1]) if len(argv) > 1 else 1
 
+    budget_min = next((float(a.split("=", 1)[1]) for a in sys.argv
+                       if a.startswith("--minutes=")), 25.0)
+    deadline = time.time() + budget_min * 60.0
     have = set() if regrade else set(load_game_log().get("date", []))
     graded = 0
     for k in range(days - 1, -1, -1):                 # oldest -> newest
@@ -38,6 +42,9 @@ def main() -> None:
         if d in have:
             print(f"[{d}] already graded")
             continue
+        if time.time() > deadline:
+            print(f"[{d}] STOPPING — time budget spent; re-run to continue")
+            break
         try:
             rows, note = evaluate_game_day(d, prefer_live=True)
         except Exception as e:                        # one bad date can't kill the run

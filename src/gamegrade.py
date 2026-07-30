@@ -151,6 +151,16 @@ def evaluate_game_day(date_iso: str, prefer_live: bool = True):
 # --------------------------------------------------------------------------- #
 # The record
 # --------------------------------------------------------------------------- #
+def _safe_corr(x, y, min_n: int = 10) -> float | None:
+    """Pearson r, or None when it isn't defined (too few games, or no spread)."""
+    x, y = pd.to_numeric(x, errors="coerce"), pd.to_numeric(y, errors="coerce")
+    m = x.notna() & y.notna()
+    if m.sum() < min_n or float(x[m].std()) < 1e-9 or float(y[m].std()) < 1e-9:
+        return None
+    r = float(np.corrcoef(x[m], y[m])[0, 1])
+    return None if r != r else round(r, 3)
+
+
 def _brier(p, y) -> float | None:
     p, y = np.asarray(p, dtype=float), np.asarray(y, dtype=float)
     m = ~(np.isnan(p) | np.isnan(y))
@@ -180,15 +190,42 @@ def game_record(log: pd.DataFrame | None = None) -> dict:
     graded_totals = d[pd.to_numeric(d["total_lean_correct"], errors="coerce") >= 0]
     gotd = d[pd.to_numeric(d.get("gotd", 0), errors="coerce").fillna(0) == 1]
 
+    # Run-error baselines. A run projection has to beat "just predict the
+    # average every time" before it means anything — game-level scoring is
+    # mostly noise, so a heavily regressed model can post a respectable-looking
+    # MAE while carrying no information at all. Without these the record would
+    # show green off a good winner% while the scores themselves were worthless.
+    actual_total = ha + aa
+    sides_actual = pd.concat([ha, aa], ignore_index=True)
+    sides_proj = pd.concat([pd.to_numeric(d["home_runs_exp"], errors="coerce"),
+                            pd.to_numeric(d["away_runs_exp"], errors="coerce")],
+                           ignore_index=True)
+    mae_total = float(pd.to_numeric(d["abs_err_total"], errors="coerce").mean())
+    mae_total_base = float((actual_total - actual_total.mean()).abs().mean())
+    mae_side = float(pd.concat([
+        pd.to_numeric(d["abs_err_home"], errors="coerce"),
+        pd.to_numeric(d["abs_err_away"], errors="coerce")]).mean())
+    mae_side_base = float((sides_actual - sides_actual.mean()).abs().mean())
+
     out.update({
         "n": int(len(d)),
         "days": int(d["date"].nunique()),
-        # run accuracy
-        "mae_side": round(float(pd.concat([
-            pd.to_numeric(d["abs_err_home"], errors="coerce"),
-            pd.to_numeric(d["abs_err_away"], errors="coerce")]).mean()), 3),
-        "mae_total": round(float(pd.to_numeric(d["abs_err_total"],
-                                               errors="coerce").mean()), 3),
+        # run accuracy, against a predict-the-mean baseline
+        "mae_side": round(mae_side, 3),
+        "mae_side_baseline": round(mae_side_base, 3),
+        "mae_total": round(mae_total, 3),
+        "mae_total_baseline": round(mae_total_base, 3),
+        "beats_mae_total": bool(mae_total < mae_total_base),
+        "beats_mae_side": bool(mae_side < mae_side_base),
+        # Correlation is the honest read on whether the projections carry
+        # information; MAE alone can look fine on a near-constant model.
+        # Undefined (None) when the projections are perfectly flat — which is
+        # itself the answer: a constant can't correlate with anything.
+        "total_corr": _safe_corr(pd.to_numeric(d["total_exp"], errors="coerce"),
+                                 actual_total),
+        "total_spread": round(float(pd.to_numeric(d["total_exp"],
+                                                  errors="coerce").std()), 2),
+        "total_spread_actual": round(float(actual_total.std()), 2),
         "avg_total_proj": round(float(pd.to_numeric(d["total_exp"],
                                                     errors="coerce").mean()), 2),
         "avg_total_actual": round(float((ha + aa).mean()), 2),
@@ -215,7 +252,28 @@ def game_record(log: pd.DataFrame | None = None) -> dict:
     out["beats_brier_baseline"] = bool(
         out["ml_brier"] is not None and out["ml_brier_baseline"] is not None
         and out["ml_brier"] < out["ml_brier_baseline"])
+    # Below this, differences of a few percent are noise. A record that reads
+    # "60% winners" on 70 games is one standard error from a coin flip, and
+    # calling that a verdict is how a model talks itself into being trusted.
+    out["proven"] = bool(out["n"] >= MIN_GAMES_FOR_A_VERDICT)
+    out["verdict"] = _verdict(out)
     return out
+
+
+MIN_GAMES_FOR_A_VERDICT = 250
+
+
+def _verdict(rec: dict) -> str:
+    """One of: unproven / failing / mixed / working. Deliberately hard to pass."""
+    if not rec.get("proven"):
+        return "unproven"
+    side_ok = rec.get("beats_home_baseline") and rec.get("beats_brier_baseline")
+    runs_ok = rec.get("beats_mae_total") and rec.get("beats_mae_side")
+    if side_ok and runs_ok:
+        return "working"
+    if side_ok or runs_ok:
+        return "mixed"
+    return "failing"
 
 
 def win_prob_calibration(log: pd.DataFrame | None = None, bins: int = 5) -> pd.DataFrame:

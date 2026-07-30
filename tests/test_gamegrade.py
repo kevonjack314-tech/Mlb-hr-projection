@@ -193,3 +193,69 @@ def test_append_is_deduped_by_date_and_game(tmp_path, monkeypatch):
     assert len(gg.load_game_log()) == 2
     again = grade_projections(_projections(), _finals(), "2026-07-21")
     assert append_game_rows(again) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Run-error baselines — the gap that would show green on a worthless projection
+# --------------------------------------------------------------------------- #
+def _flat_log(n=300):
+    """A model that projects ~the same score every game — good MAE, no signal."""
+    rng = np.random.default_rng(5)
+    rows = []
+    for i in range(n):
+        ha, aa = int(rng.poisson(4.5)), int(rng.poisson(4.4))
+        rows.append({
+            "date": f"2026-07-{(i % 25) + 1:02d}", "game": f"A{i} @ B{i}",
+            "home_team": "BBB", "away_team": "AAA",
+            "home_runs_exp": 4.6, "away_runs_exp": 4.5, "total_exp": 9.1,
+            "winner": "BBB", "win_prob": 0.52, "p_home": 0.52,
+            "total_line": 8.5, "total_lean": "Over", "total_lean_prob": 0.52,
+            "confidence": 10.0, "gotd": 0,
+            "home_runs_actual": ha, "away_runs_actual": aa,
+            "total_actual": ha + aa, "innings": 9,
+            "winner_actual": "BBB" if ha > aa else "AAA",
+            "winner_correct": int(ha > aa),
+            "total_over_actual": int(ha + aa > 8.5), "total_lean_correct": 1,
+            "abs_err_home": abs(ha - 4.6), "abs_err_away": abs(aa - 4.5),
+            "abs_err_total": abs(ha + aa - 9.1),
+        })
+    return pd.DataFrame(rows)
+
+
+def test_a_near_constant_projection_does_not_beat_the_mae_baseline():
+    """MAE alone flatters a flat model — the baseline is what exposes it."""
+    rec = game_record(_flat_log())
+    assert rec["mae_total_baseline"] is not None
+    assert not rec["beats_mae_total"], "a constant projection must not 'beat' the mean"
+    assert rec["total_spread"] < 0.5           # it barely differentiates games
+    assert rec["total_spread_actual"] > 3.0    # reality is far wider
+    # A perfectly flat projection has no correlation to report — that IS the
+    # finding, and the record must not paper over it with a number.
+    assert rec["total_corr"] is None
+
+
+def test_a_real_projection_does_beat_the_mae_baseline():
+    log = _flat_log()
+    # Give the projections genuine signal: track the actual totals.
+    log["total_exp"] = log["total_actual"] * 0.7 + 2.7
+    log["abs_err_total"] = (log["total_actual"] - log["total_exp"]).abs()
+    rec = game_record(log)
+    assert rec["beats_mae_total"] and rec["total_corr"] > 0.5
+
+
+def test_small_samples_are_reported_as_unproven_not_as_a_verdict():
+    """70 games and a 60% winner rate is one standard error from a coin flip."""
+    small = _flat_log(n=70)
+    rec = game_record(small)
+    assert rec["proven"] is False and rec["verdict"] == "unproven"
+    # The same model on a real sample gets an actual verdict.
+    big = game_record(_flat_log(n=400))
+    assert big["proven"] is True and big["verdict"] in ("failing", "mixed", "working")
+
+
+def test_verdict_requires_both_the_side_and_the_run_baselines():
+    log = _flat_log(n=400)
+    rec = game_record(log)
+    # This model is flat on runs, so it can never read "working".
+    assert not rec["beats_mae_total"]
+    assert rec["verdict"] in ("failing", "mixed")

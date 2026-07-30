@@ -858,24 +858,43 @@ def _render_score_record():
               f"{rec['avg_total_proj']:.1f} / {rec['avg_total_actual']:.1f}",
               f"{rec['total_bias']:+.2f} runs bias", delta_color="off")
 
-    # The honest read. A model that loses to its own baseline should say so.
-    if rec["beats_home_baseline"] and rec["beats_brier_baseline"]:
-        st.success(
-            f"🟢 Beating both baselines — winners **{rec['winner_pct']:.0f}%** vs "
-            f"**{rec['home_baseline_pct']:.0f}%** for blindly taking the home "
-            f"team, and moneyline Brier **{rec['ml_brier']}** vs "
-            f"**{rec['ml_brier_baseline']}** for the base rate.")
-    elif rec["beats_home_baseline"] or rec["beats_brier_baseline"]:
+    # The honest read. Four baselines, and every one of them has to clear.
+    side_txt = (f"winners **{rec['winner_pct']:.0f}%** vs "
+                f"**{rec['home_baseline_pct']:.0f}%** for blindly taking the home "
+                f"team · moneyline Brier **{rec['ml_brier']}** vs "
+                f"**{rec['ml_brier_baseline']}** base rate")
+    run_txt = (f"total MAE **{rec['mae_total']:.2f}** vs "
+               f"**{rec['mae_total_baseline']:.2f}** for just projecting the "
+               f"average every game")
+    verdict = rec.get("verdict")
+    if verdict == "unproven":
         st.warning(
-            f"🟡 Mixed — winners {rec['winner_pct']:.0f}% vs "
-            f"{rec['home_baseline_pct']:.0f}% home baseline; Brier "
-            f"{rec['ml_brier']} vs {rec['ml_brier_baseline']} base rate. "
-            "One of the two isn't clearing yet.")
+            f"🟡 **Unproven — {rec['n']} games graded, needs ~250.** At this "
+            f"sample a few points either way is noise, so there's no verdict "
+            f"to give yet. Where it stands: {side_txt} · {run_txt}.")
+    elif verdict == "working":
+        st.success(f"🟢 Beating every baseline — {side_txt} · {run_txt}.")
+    elif verdict == "mixed":
+        st.warning(
+            f"🟡 Mixed — {side_txt} · {run_txt}. "
+            + ("The side picks clear their baselines but the run projections "
+               "don't, so trust the winner/total *lean* and not the projected "
+               "score itself." if rec.get("beats_home_baseline")
+               else "The run projections clear but the side picks don't."))
     else:
-        st.error(
-            f"🔴 Not beating the baselines yet — winners {rec['winner_pct']:.0f}% "
-            f"vs {rec['home_baseline_pct']:.0f}% for just taking the home team. "
-            "Treat these picks as unproven.")
+        st.error(f"🔴 Not beating the baselines — {side_txt} · {run_txt}. "
+                 "Treat these picks as unproven.")
+
+    # Spread is the tell a headline MAE can hide: a model that projects every
+    # game at ~9.2 runs will post a fine-looking MAE while saying nothing.
+    if rec.get("total_corr") is not None:
+        st.caption(
+            f"Projected totals spread **{rec['total_spread']:.2f}** runs vs "
+            f"**{rec['total_spread_actual']:.2f}** actual, correlation "
+            f"**{rec['total_corr']:+.2f}**. Game scoring is mostly noise so a "
+            "regressed projection is correct — but a *near-flat* one carries no "
+            "information, however good its MAE looks."
+        )
 
     if rec.get("total_pct") is not None:
         st.caption(f"Over/Under lean: **{rec['total_pct']:.0f}%** on "

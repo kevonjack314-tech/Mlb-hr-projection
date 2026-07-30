@@ -165,3 +165,98 @@ def test_hot_star_moves_less_than_a_hot_under_the_radar_bat():
     star_swing = form(30, hot) - form(30, cold)
     under_swing = form(4, hot) - form(4, cold)
     assert under_swing > star_swing > 0
+
+
+# --------------------------------------------------------------------------- #
+# Per-date cleaning — a record gets fixed one day at a time
+# --------------------------------------------------------------------------- #
+def _mixed_log(clean_dates=("2026-07-26",), leaked_dates_=("2026-07-01",), n=400):
+    """A log where some dates were graded before the window fix and some after."""
+    rows = []
+    for d in list(clean_dates) + list(leaked_dates_):
+        leaked = d in leaked_dates_
+        for i in range(n):
+            hit = int(i % 8 == 0)
+            # Leaked days: an HR day essentially never shows a zero window.
+            zero = (i % 100) < (0 if (leaked and hit) else 60)
+            rows.append({"date": d, "player": f"{d}-p{i}", "hit_hr": hit,
+                         "hr_prob_game": 0.12, "hr_score": 60.0,
+                         "hr_rate_7": 0.0 if zero else 0.06})
+    return pd.DataFrame(rows)
+
+
+def test_leaked_dates_are_identified_individually():
+    from src.tuning import leaked_dates
+    bad = leaked_dates(_mixed_log())
+    assert bad == {"2026-07-01"}
+
+
+def test_clean_log_keeps_the_good_days_and_drops_the_bad():
+    from src.tuning import clean_log
+    kept, note = clean_log(_mixed_log())
+    assert set(kept["date"]) == {"2026-07-26"}
+    assert note and "leaked date" in note
+    # A fully clean log is passed straight through, untouched.
+    ok = _mixed_log(clean_dates=("2026-07-26", "2026-07-27"), leaked_dates_=())
+    kept2, note2 = clean_log(ok)
+    assert len(kept2) == len(ok) and note2 is None
+
+
+def test_calibration_refuses_to_train_on_leaked_dates():
+    """The calibration curve touches every live probability — it must be clean."""
+    from src.tuning import fit_calibration
+    out = fit_calibration(_mixed_log(n=600))
+    assert "excluded" in out
+    # Only the clean date's rows may reach the fit.
+    assert out["n"] <= 600
+
+
+def test_a_date_with_too_few_home_runs_is_not_judged():
+    """Too small to tell, too small to matter — keep it rather than guess."""
+    from src.tuning import leaked_dates
+    # 3 home runs on the date — below the 5 needed to call it either way, even
+    # though none of them shows a zero window and the non-HR games do.
+    tiny = pd.DataFrame({"date": ["2026-07-02"] * 20,
+                         "hit_hr": [1, 1, 1] + [0] * 17,
+                         "hr_rate_7": [0.06] * 3 + [0.0] * 12 + [0.06] * 5})
+    assert leaked_dates(tiny) == set()
+    # Same shape with 8 home runs IS judged, and flagged.
+    big = pd.DataFrame({"date": ["2026-07-02"] * 40,
+                        "hit_hr": [1] * 8 + [0] * 32,
+                        "hr_rate_7": [0.06] * 8 + [0.0] * 24 + [0.06] * 8})
+    assert leaked_dates(big) == {"2026-07-02"}
+
+
+def test_a_feed_with_no_zeros_at_all_is_never_judged_leaked():
+    """The worst failure mode would be silently deleting the whole training set.
+
+    If a future feed change stopped emitting exact zeros, every date would look
+    leaked and every fit would train on nothing. A date is only judged when its
+    non-HR games show zeros to compare against.
+    """
+    from src.tuning import clean_log, leaked_dates
+    smooth = pd.DataFrame({"date": ["2026-07-02"] * 200,
+                           "hit_hr": [1] * 25 + [0] * 175,
+                           "hr_rate_7": [0.03 + i * 1e-4 for i in range(200)]})
+    assert leaked_dates(smooth) == set()
+    kept, note = clean_log(smooth)
+    assert len(kept) == 200 and note is None
+
+
+def test_a_failed_feed_day_is_kept_not_called_clean_or_leaked():
+    """All-NaN recent form means the pull failed — it cannot have leaked.
+
+    Those rows still carry a valid prediction and outcome, so calibration
+    should keep them; only the FEATURE model (which needs the columns) filters
+    them out, via its coverage threshold.
+    """
+    from src.tuning import clean_log, fit_calibration, leaked_dates
+    dead = pd.DataFrame({"date": ["2026-07-08"] * 400,
+                         "player": [f"p{i}" for i in range(400)],
+                         "hit_hr": [1 if i % 8 == 0 else 0 for i in range(400)],
+                         "hr_prob_game": 0.12,
+                         "hr_rate_7": [float("nan")] * 400})
+    assert leaked_dates(dead) == set()
+    kept, note = clean_log(dead)
+    assert len(kept) == 400 and note is None
+    assert fit_calibration(dead)["n"] == 400      # usable for calibration

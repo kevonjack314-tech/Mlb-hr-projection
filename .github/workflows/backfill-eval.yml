@@ -31,7 +31,7 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,7 +52,7 @@ jobs:
           if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
           REGRADE=""
           if [ "${{ github.event.inputs.regrade }}" = "true" ]; then REGRADE="--regrade"; fi
-          python scripts/backfill_eval.py "$DATE" "$DAYS" $REGRADE
+          python scripts/backfill_eval.py "$DATE" "$DAYS" $REGRADE --minutes=110
 
       - name: Backfill the score-predictor record
         run: |
@@ -61,7 +61,7 @@ jobs:
           if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
           REGRADE=""
           if [ "${{ github.event.inputs.regrade }}" = "true" ]; then REGRADE="--regrade"; fi
-          python scripts/grade_games.py "$DATE" "$DAYS" $REGRADE || echo "game grading skipped"
+          python scripts/grade_games.py "$DATE" "$DAYS" $REGRADE --minutes=40 || echo "game grading skipped"
 
       - name: Refresh the lineup HR log from the graded record
         run: |
