@@ -88,6 +88,10 @@ FEATURE_COLS = [
     "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
     # real platoon splits + bullpen exposure (may be sparse early on)
     "woba_vs_l", "woba_vs_r", "woba_vs_hand", "bullpen_hr9",
+    # opposing staff quality beyond home runs: strikeouts are the primary
+    # run-suppression lever and drive how many balls are even put in play
+    "pitcher_k_pct", "pitcher_bb_pct", "pitcher_fip", "sp_ip_per_start",
+    "bullpen_era", "bullpen_k_pct",
     # fence geometry x pull side
     "park_fit_mult", "park_porch_ft",
     # opposing starter's meatball (middle-middle) supply
@@ -558,7 +562,10 @@ FEATURE_LABELS = {
     "pitcher_hr9": "Starter HR/9", "park_factor": "Park factor", "wind_mult": "Wind",
     "temp_f": "Temperature", "expected_pa": "Expected PAs",
     "woba_vs_l": "wOBA vs LHP", "woba_vs_r": "wOBA vs RHP", "woba_vs_hand": "wOBA vs today's hand",
-    "bullpen_hr9": "Opposing bullpen HR/9", "park_fit_mult": "Park fence fit (pull side)",
+    "bullpen_hr9": "Opposing bullpen HR/9",
+    "pitcher_k_pct": "Starter K%", "pitcher_bb_pct": "Starter BB%",
+    "pitcher_fip": "Starter FIP", "sp_ip_per_start": "Starter IP/start",
+    "bullpen_era": "Opposing bullpen ERA", "bullpen_k_pct": "Opposing bullpen K%", "park_fit_mult": "Park fence fit (pull side)",
     "park_porch_ft": "Pull-side fence distance", "sp_meatball_pct": "Starter meatball rate",
     "sp_velo_delta": "Starter velo trend", "sp_velo_last": "Starter last-start velo",
     "sp_tto_penalty": "Starter 3rd-time-through penalty",
@@ -693,7 +700,9 @@ def evaluate_day(date_iso: str, prefer_live: bool = True):
     import datetime as dt
 
     game_date = dt.date.fromisoformat(date_iso)
-    df, source, _notes = get_slate(game_date, prefer_live=prefer_live)
+    # as_of: rebuild season stats as they stood the day BEFORE the game, so a
+    # graded June row can't carry an end-of-season stat line.
+    df, source, _notes = get_slate(game_date, prefer_live=prefer_live, as_of=True)
     if df is None or df.empty:
         return None, "no slate"
     if not str(source).startswith("LIVE"):

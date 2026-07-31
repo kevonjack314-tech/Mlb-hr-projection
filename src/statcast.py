@@ -254,6 +254,118 @@ def get_season_batter_table(year: int, min_bbe: int = 25) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# --------------------------------------------------------------------------- #
+# Point-in-time season stats (as of a DATE, not as of today)
+# --------------------------------------------------------------------------- #
+# Savant's season leaderboard only ships "as of now". Grading 2026-06-14 with
+# it hands the model a hitter's END-of-season line on a June day — the same
+# class of contamination as the recent-form leak, just milder and spread over
+# every batted-ball feature at once. Live picks are unaffected (today's "as of
+# now" IS as of today); only the graded record was.
+#
+# Rebuilding season-to-date per graded day would mean one enormous Statcast
+# pull per date. Instead the season is pulled ONE MONTH AT A TIME and cached,
+# so any date is (whole cached months) + (one partial month) — the backfill's
+# second date onward costs almost nothing.
+_PIT_COLS = ["game_date", "batter", "events", "type", "launch_speed",
+             "launch_angle", "barrel", "estimated_woba_using_speedangle",
+             "hit_distance_sc", "bb_type"]
+
+
+@_cache_ok
+def _statcast_month(year: int, month: int) -> pd.DataFrame:
+    """One month of pitch-level Statcast, trimmed to the columns we aggregate.
+
+    Trimming on arrival matters: a full month is ~700k rows and holding every
+    Statcast column for several months at once will exhaust a CI runner.
+    """
+    if not _HAS_PYB:
+        return pd.DataFrame()
+    start = dt.date(year, month, 1)
+    end = (dt.date(year + (month == 12), (month % 12) + 1, 1)
+           - dt.timedelta(days=1))
+    try:
+        sc = pyb.statcast(start_dt=start.isoformat(), end_dt=end.isoformat(),
+                          verbose=False)
+    except Exception as exc:
+        note_diag(f"statcast_month {year}-{month:02d}", exc)
+        return pd.DataFrame()
+    if sc is None or sc.empty or "batter" not in sc.columns:
+        return pd.DataFrame()
+    keep = [c for c in _PIT_COLS if c in sc.columns]
+    sc = sc[keep].copy()
+    sc["game_date"] = pd.to_datetime(sc["game_date"], errors="coerce").dt.date
+    return sc
+
+
+def season_to_date_pitches(end_date_iso: str, season_start_month: int = 3) -> pd.DataFrame:
+    """Every pitch of the season STRICTLY BEFORE `end_date_iso`."""
+    end = dt.date.fromisoformat(end_date_iso)
+    frames = []
+    for m in range(season_start_month, end.month + 1):
+        part = _statcast_month(end.year, m)
+        if part is not None and not part.empty:
+            frames.append(part)
+    if not frames:
+        return pd.DataFrame()
+    all_p = pd.concat(frames, ignore_index=True)
+    return all_p[all_p["game_date"] < end]
+
+
+@_cache_ok
+def get_season_batter_table_as_of(end_date_iso: str, min_bbe: int = 25) -> pd.DataFrame:
+    """Season-to-date batted-ball quality per batter, as of the day before.
+
+    Same shape as `get_season_batter_table` but honest about time. Falls back
+    to an empty frame on any failure, and the caller then uses the as-of-now
+    table — a mild lookahead beats no data at all, but it is no longer the
+    default for grading.
+    """
+    p = season_to_date_pitches(end_date_iso)
+    if p is None or p.empty:
+        return pd.DataFrame()
+    pa_rows = p[p["events"].notna()]
+    bbe = p[p["launch_speed"].notna()] if "launch_speed" in p.columns else p.iloc[0:0]
+    if pa_rows.empty or bbe.empty:
+        return pd.DataFrame()
+
+    g = bbe.groupby("batter")
+    tbl = pd.DataFrame({
+        "avg_ev": g["launch_speed"].mean().round(1),
+        "max_ev": g["launch_speed"].max().round(1),
+        "launch_angle": g["launch_angle"].mean().round(1) if "launch_angle" in bbe else np.nan,
+        "hard_hit_pct": (g["launch_speed"].apply(lambda s: (s >= 95).mean()) * 100).round(1),
+        "bbe": g.size(),
+    })
+    if "barrel" in bbe.columns:
+        tbl["barrel_pct"] = (g["barrel"].mean() * 100).round(1)
+    if "estimated_woba_using_speedangle" in bbe.columns:
+        tbl["xwoba"] = g["estimated_woba_using_speedangle"].mean().round(3)
+    if "bb_type" in bbe.columns:
+        mix = bbe.groupby("batter")["bb_type"].value_counts(normalize=True).unstack(fill_value=0)
+        for src_col, dst in (("fly_ball", "fb_pct"), ("ground_ball", "gb_pct"),
+                             ("line_drive", "ld_pct")):
+            if src_col in mix.columns:
+                tbl[dst] = (mix[src_col] * 100).round(1)
+
+    pg = pa_rows.groupby("batter")
+    tbl["pa"] = pg.size()
+    tbl["season_hr"] = pa_rows.assign(_hr=pa_rows["events"].eq("home_run")) \
+                              .groupby("batter")["_hr"].sum().astype(int)
+    tbl["hr_per_pa"] = (tbl["season_hr"] / tbl["pa"]).round(5)
+    if "barrel" in bbe.columns:
+        tbl["brl_pa"] = (g["barrel"].sum() / tbl["pa"] * 100).round(1)
+    if "fb_pct" in tbl.columns:
+        fb_count = tbl["bbe"] * tbl["fb_pct"] / 100.0
+        tbl["hr_fb"] = (tbl["season_hr"] / fb_count.where(fb_count > 0) * 100).round(1)
+
+    tbl = tbl[tbl["bbe"] >= min_bbe]
+    if tbl.empty:
+        return pd.DataFrame()
+    tbl.index.name = "mlbam_id"
+    return tbl.reset_index()
+
+
 def _assemble_season_table(ev: pd.DataFrame, year: int) -> pd.DataFrame:
     ev = ev.rename(
         columns={
@@ -862,33 +974,56 @@ _TEAM_ALIASES = {"AZ": "ARI", "ARI": "AZ", "ATH": "OAK", "OAK": "ATH"}
 
 
 @_cache_ok
-def get_bullpen_hr9_table(year: int) -> dict:
-    """{team_abbr: bullpen HR/9} from FanGraphs — pure relievers (GS == 0).
+def get_bullpen_table(year: int) -> dict:
+    """{team_abbr: {bullpen_hr9, bullpen_era, bullpen_k_pct}} — pure relievers.
 
-    ~40% of a hitter's PAs come against the pen, so the opponent's bullpen
-    homer-proneness is a real part of the matchup the starter-only view misses.
+    HR/9 is the number that matters for a home-run prop, but a run projection
+    needs to know whether the pen that covers ~42% of the innings is a
+    strikeout unit or a fire. Both come out of one FanGraphs pull.
     """
     fg = _fg_pitching_raw(year)
     if fg is None or fg.empty or "Team" not in fg.columns:
         return {}
     df = fg.copy()
-    df["GS"] = pd.to_numeric(df.get("GS"), errors="coerce").fillna(0)
-    df["IP"] = pd.to_numeric(df.get("IP"), errors="coerce").fillna(0.0)
-    df["HR"] = pd.to_numeric(df.get("HR"), errors="coerce").fillna(0.0)
+    # ER / SO / TBF are absent on some FanGraphs endpoints — stay NaN there so
+    # the derived ERA / K% are simply omitted rather than invented.
+    for c, d in (("GS", 0), ("IP", 0.0), ("HR", 0.0), ("ER", np.nan), ("SO", np.nan),
+                 ("TBF", np.nan)):
+        col = pd.to_numeric(df[c], errors="coerce") if c in df.columns \
+            else pd.Series(np.nan, index=df.index)
+        df[c] = col.fillna(d) if d == d else col
     rp = df[(df["GS"] == 0) & (df["IP"] > 0)]
     if rp.empty:
         return {}
-    agg = rp.groupby("Team").agg(hr=("HR", "sum"), ip=("IP", "sum"))
+    agg = rp.groupby("Team").agg(hr=("HR", "sum"), ip=("IP", "sum"),
+                                 er=("ER", "sum"), so=("SO", "sum"),
+                                 tbf=("TBF", "sum"))
     agg = agg[agg["ip"] >= 30]                      # ignore tiny team samples
     out: dict = {}
     for team, r in agg.iterrows():
         abbr = _FG_TEAM_FIX.get(str(team), str(team))
-        hr9 = round(float(9.0 * r["hr"] / r["ip"]), 2)
-        out[abbr] = hr9
+        ip = float(r["ip"])
+        rec = {"bullpen_hr9": round(9.0 * float(r["hr"]) / ip, 2)}
+        if r["er"] == r["er"] and r["er"] > 0:
+            rec["bullpen_era"] = round(9.0 * float(r["er"]) / ip, 2)
+        if r["so"] == r["so"] and r["tbf"] == r["tbf"] and r["tbf"] > 0:
+            rec["bullpen_k_pct"] = round(100.0 * float(r["so"]) / float(r["tbf"]), 1)
+        out[abbr] = rec
         alias = _TEAM_ALIASES.get(abbr)
         if alias:
-            out.setdefault(alias, hr9)
+            out.setdefault(alias, rec)
     return out
+
+
+def get_bullpen_hr9_table(year: int) -> dict:
+    """{team_abbr: bullpen HR/9}. Thin view over `get_bullpen_table`."""
+    return {k: v["bullpen_hr9"] for k, v in get_bullpen_table(year).items()
+            if "bullpen_hr9" in v}
+
+
+# The caching lives on get_bullpen_table; keep the old view's cache_clear so
+# callers (and tests) that reach for it still work.
+get_bullpen_hr9_table.cache_clear = get_bullpen_table.cache_clear
 
 
 def lookup_bullpen_hr9(year: int, team_abbr: str | None) -> float | None:
@@ -902,8 +1037,14 @@ def lookup_bullpen_hr9(year: int, team_abbr: str | None) -> float | None:
 def get_pitching_table(year: int) -> pd.DataFrame:
     """Season pitcher peripherals from FanGraphs, keyed by normalized name.
 
-    Columns: pitcher_hr9, pitcher_gb_pct, pitcher_fb_pct, pitcher_barrel_pct_allowed.
-    Returns empty on failure.
+    The same payload also carries strikeout, walk and run-prevention rates plus
+    innings — the score model was reading only three fields out of it and had
+    no idea whether a starter punches out 30% of hitters or 15%, which is the
+    primary run-suppression mechanism in baseball.
+
+    Columns: pitcher_hr9, pitcher_gb_pct, pitcher_fb_pct,
+    pitcher_barrel_pct_allowed, pitcher_k_pct, pitcher_bb_pct, pitcher_era,
+    pitcher_fip, sp_ip_per_start.
     """
     fg = _fg_pitching_raw(year)
     if fg is None or fg.empty:
@@ -918,11 +1059,45 @@ def get_pitching_table(year: int) -> pd.DataFrame:
         out["pitcher_barrel_pct_allowed"] = fg["Barrel%"].map(_coerce_pct)
     else:
         out["pitcher_barrel_pct_allowed"] = np.nan
+
+    # Strikeouts / walks. FanGraphs ships K% and BB% as rates on some endpoints
+    # and K/9, BB/9 on others — derive from whichever is present.
+    out["pitcher_k_pct"] = (fg["K%"].map(_coerce_pct) if "K%" in fg
+                            else _rate_from_per9(fg.get("K/9")))
+    out["pitcher_bb_pct"] = (fg["BB%"].map(_coerce_pct) if "BB%" in fg
+                             else _rate_from_per9(fg.get("BB/9")))
+    out["pitcher_era"] = pd.to_numeric(fg.get("ERA"), errors="coerce")
+    # FIP over ERA where available: it strips the defense and sequencing luck
+    # that make a starter's ERA a poor guide to how he'll pitch tonight.
+    out["pitcher_fip"] = pd.to_numeric(fg.get("FIP"), errors="coerce")
+
+    # How deep he actually goes. `expected_pa` assumed every hitter split his
+    # trips between starter and bullpen identically — but facing an arm who
+    # goes 7 you get ~2.5 cracks at him and ~1.5 at the pen, and facing an
+    # opener it inverts.
+    ip = pd.to_numeric(fg.get("IP"), errors="coerce")
+    gs = pd.to_numeric(fg.get("GS"), errors="coerce")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ipgs = ip / gs.where(gs > 0)
+    out["sp_ip_per_start"] = pd.to_numeric(ipgs, errors="coerce").clip(1.0, 8.0)
+
     if "IP" in fg:
-        out["ip"] = pd.to_numeric(fg["IP"], errors="coerce")
+        out["ip"] = ip
         out = out.sort_values("ip", ascending=False)
     out = out.drop_duplicates("name_key", keep="first")
     return out.reset_index(drop=True)
+
+
+def _rate_from_per9(per9) -> pd.Series | float:
+    """Convert a K/9 or BB/9 rate to an approximate percentage of batters faced.
+
+    ~38 batters face a pitcher per 9 innings at league average, so
+    per-9 / 38 is a serviceable stand-in when the percentage column is absent.
+    """
+    if per9 is None:
+        return np.nan
+    v = pd.to_numeric(per9, errors="coerce")
+    return (v / 38.0 * 100.0).clip(0.0, 60.0)
 
 
 @_cache_ok
@@ -992,7 +1167,9 @@ def lookup_pitching(year: int, name: str | None) -> dict | None:
     if isinstance(row, pd.DataFrame):
         row = row.iloc[0]
     out = {}
-    for k in ("pitcher_hr9", "pitcher_gb_pct", "pitcher_fb_pct", "pitcher_barrel_pct_allowed"):
+    for k in ("pitcher_hr9", "pitcher_gb_pct", "pitcher_fb_pct",
+              "pitcher_barrel_pct_allowed", "pitcher_k_pct", "pitcher_bb_pct",
+              "pitcher_era", "pitcher_fip", "sp_ip_per_start"):
         v = row.get(k)
         if v is not None and not pd.isna(v):
             out[k] = float(v)
@@ -1023,8 +1200,30 @@ def _recent_by_id_index(end_date_iso: str):
     return t.set_index("mlbam_id")
 
 
-def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | None:
-    """Return a real season profile for a player, or None if not found."""
+@_cache_ok
+def _season_as_of_by_id(end_date_iso: str):
+    t = get_season_batter_table_as_of(end_date_iso)
+    if t is None or t.empty or "mlbam_id" not in t.columns:
+        return None
+    return t.set_index("mlbam_id")
+
+
+def lookup_season(year: int, name: str | None, mlbam_id: int | None,
+                  as_of: str | None = None) -> dict | None:
+    """Return a real season profile for a player, or None if not found.
+
+    `as_of` (YYYY-MM-DD) asks for the line as it stood the day BEFORE that
+    date, which is what grading a past day needs — the as-of-now leaderboard
+    would hand a June row the hitter's end-of-season numbers. Live scoring
+    passes no `as_of` (today's "as of now" already is as of today) and takes
+    the cheap leaderboard path.
+
+    Point-in-time values are overlaid on the as-of-now row rather than
+    replacing it: the Statcast rebuild covers batted-ball quality and counting
+    stats, while plate-discipline rates (whiff, chase, zone contact) only exist
+    on the FanGraphs line. Those carry the mild lookahead that remains, and
+    they are the least outcome-coupled fields in the profile.
+    """
     by_id = _season_by_id_index(year)
     row = None
     if by_id is not None and mlbam_id is not None and mlbam_id in by_id.index:
@@ -1036,6 +1235,18 @@ def lookup_season(year: int, name: str | None, mlbam_id: int | None) -> dict | N
             row = by_name.loc[key]
     if row is None:
         return None
+    if as_of and mlbam_id is not None:
+        pit = _season_as_of_by_id(as_of)
+        if pit is not None and mlbam_id in pit.index:
+            asof_row = pit.loc[mlbam_id]
+            if isinstance(asof_row, pd.DataFrame):
+                asof_row = asof_row.iloc[0]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            row = row.copy()
+            for c in asof_row.index:
+                if c != "mlbam_id" and asof_row[c] == asof_row[c]:
+                    row[c] = asof_row[c]
     if isinstance(row, pd.DataFrame):
         row = row.iloc[0]
 

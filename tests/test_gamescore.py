@@ -237,3 +237,17 @@ def test_rationale_names_the_park_when_it_matters(_games):
     coors = _games[_games["game"].str.contains("COL")]
     if not coors.empty:
         assert "park" in game_rationale(coors.iloc[0])
+
+
+def test_projections_are_no_longer_near_flat(_games):
+    """The diagnosed failure: 0.56 runs of spread against reality's ~4.5.
+
+    A regressed run projection is correct — game scoring is mostly noise — but
+    a near-constant one carries no information whatever its MAE looks like.
+    Market totals live around 0.8-1.0 runs of spread; this is the floor that
+    keeps the model in that neighbourhood rather than back at flat.
+    """
+    assert _games["total_exp"].std() >= 0.85
+    assert _games["total_exp"].max() - _games["total_exp"].min() >= 2.5
+    # Win probabilities have to differentiate too — they topped out at .599.
+    assert _games["win_prob"].max() >= 0.62

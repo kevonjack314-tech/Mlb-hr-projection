@@ -127,7 +127,7 @@ def evaluate_game_day(date_iso: str, prefer_live: bool = True):
     from .sources import fetch_final_scores, get_slate
 
     game_date = dt.date.fromisoformat(date_iso)
-    df, source, _ = get_slate(game_date, prefer_live=prefer_live)
+    df, source, _ = get_slate(game_date, prefer_live=prefer_live, as_of=True)
     if df is None or df.empty:
         return None, "no slate"
     if not str(source).startswith("LIVE"):

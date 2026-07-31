@@ -43,8 +43,13 @@ HOME_FIELD_RUNS = 0.12      # modern home edge, in runs — small and shrinking
 
 LEAGUE_SP_HR9 = 1.25
 LEAGUE_SP_BARREL = 8.0      # barrel% allowed
+LEAGUE_SP_K_PCT = 22.5      # strikeout rate — the biggest run-suppression lever
+LEAGUE_SP_BB_PCT = 8.0
+LEAGUE_SP_FIP = 4.15
 LEAGUE_PEN_HR9 = 1.15
-SP_INNINGS_SHARE = 0.58     # a modern starter covers ~5.2 of 9 innings
+LEAGUE_PEN_ERA = 4.05
+LEAGUE_PEN_K_PCT = 23.5
+SP_INNINGS_SHARE = 0.58     # fallback: a modern starter covers ~5.2 of 9
 
 # Runs are overdispersed relative to Poisson. Real MLB team-game scoring is
 # mean ~4.45 with variance ~9.7 — a ratio of ~2.2, because innings are
@@ -128,33 +133,66 @@ def pitching_multiplier(opp_side: pd.DataFrame) -> dict:
         return out
     hr9 = _med(opp_side, "pitcher_hr9")
     brl = _med(opp_side, "pitcher_barrel_pct_allowed")
+    k_pct = _med(opp_side, "pitcher_k_pct")
+    bb_pct = _med(opp_side, "pitcher_bb_pct")
+    fip = _med(opp_side, "pitcher_fip")
     pen = _med(opp_side, "bullpen_hr9")
+    pen_k = _med(opp_side, "bullpen_k_pct")
+    pen_era = _med(opp_side, "bullpen_era")
 
     sp = 1.0
-    if hr9 is not None:
+    # Strikeouts are the primary run-suppression mechanism: a punched-out hitter
+    # cannot advance a runner, reach on an error, or find a hole. This is the
+    # largest single term here and the model ran without it entirely.
+    if k_pct is not None:
+        sp += 0.55 * (LEAGUE_SP_K_PCT - k_pct) / LEAGUE_SP_K_PCT
+    if bb_pct is not None:
+        sp += 0.14 * (bb_pct - LEAGUE_SP_BB_PCT) / LEAGUE_SP_BB_PCT
+    # FIP over ERA: it strips the defense and sequencing luck that make a
+    # starter's ERA a poor guide to how he'll pitch tonight.
+    if fip is not None:
+        sp += 0.20 * (fip / LEAGUE_SP_FIP - 1.0)
+    elif hr9 is not None:
         sp += 0.16 * (hr9 / LEAGUE_SP_HR9 - 1.0)
     if brl is not None:
-        sp += 0.14 * (brl / LEAGUE_SP_BARREL - 1.0)
+        sp += 0.10 * (brl / LEAGUE_SP_BARREL - 1.0)
     # A starter who has lost velo off his own baseline is getting hit harder
     # than his season line says — the season line hasn't caught up yet.
     dv = _med(opp_side, "sp_velo_delta")
     if dv is not None:
         sp += 0.010 * (-dv)          # -1.0 mph => +1% runs
-    sp = float(np.clip(sp, 0.72, 1.32))
+    sp = float(np.clip(sp, 0.62, 1.45))
 
     p = 1.0
-    if pen is not None:
+    if pen_era is not None:
+        p += 0.26 * (pen_era / LEAGUE_PEN_ERA - 1.0)
+    elif pen is not None:
         p += 0.20 * (pen / LEAGUE_PEN_HR9 - 1.0)
-    p = float(np.clip(p, 0.80, 1.25))
+    if pen_k is not None:
+        p += 0.30 * (LEAGUE_PEN_K_PCT - pen_k) / LEAGUE_PEN_K_PCT
+    p = float(np.clip(p, 0.75, 1.32))
+
+    # How much of the game he actually covers. A 6.5-IP arm exposes the lineup
+    # to the pen for 2.5 innings; a 4-IP arm for 5, which is a different game.
+    share = sp_innings_share(_med(opp_side, "sp_ip_per_start"))
 
     out.update({
         "sp_mult": round(sp, 4), "pen_mult": round(p, 4),
-        "staff_mult": round(SP_INNINGS_SHARE * sp + (1 - SP_INNINGS_SHARE) * p, 4),
-        "sp_hr9": hr9, "pen_hr9": pen,
+        "staff_mult": round(share * sp + (1 - share) * p, 4),
+        "sp_hr9": hr9, "pen_hr9": pen, "sp_k_pct": k_pct, "sp_fip": fip,
+        "sp_innings_share": round(share, 3),
         "sp_name": (opp_side.get("pitcher_name").iloc[0]
                     if "pitcher_name" in opp_side.columns and len(opp_side) else None),
     })
     return out
+
+
+def sp_innings_share(ip_per_start) -> float:
+    """Fraction of the game's innings the starter covers, from his real IP/GS."""
+    ip = _num(ip_per_start)
+    if ip is None:
+        return SP_INNINGS_SHARE
+    return float(np.clip(ip / 9.0, 0.15, 0.85))
 
 
 # --------------------------------------------------------------------------- #

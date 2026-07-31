@@ -501,7 +501,27 @@ def _pitcher_profile(team_abbr: str, slate_seed: str) -> dict:
     pmix_fb = rng.randint(44, 64)
     pmix_br = min(rng.randint(20, 38), 95 - pmix_fb)
     pmix_os = 100 - pmix_fb - pmix_br
+    # Strikeouts, walks, run prevention and workload. Drawn from an INDEPENDENT
+    # seed so adding them can't shift the existing deterministic stream and
+    # silently move every other demo fixture.
+    srng = random.Random(_seed_int(team_abbr, slate_seed, "staff"))
+    k_pct = round({1: 16.5, 2: 19.5, 3: 22.5, 4: 25.5, 5: 29.5}[tier]
+                  + srng.uniform(-2.0, 2.0), 1)
+    bb_pct = round({1: 10.0, 2: 9.0, 3: 8.0, 4: 7.0, 5: 6.0}[tier]
+                   + srng.uniform(-1.0, 1.0), 1)
+    fip = round({1: 5.20, 2: 4.60, 3: 4.15, 4: 3.65, 5: 3.05}[tier]
+                + srng.uniform(-0.25, 0.25), 2)
+    era = round(fip + srng.uniform(-0.55, 0.55), 2)
+    # Better arms work deeper; the occasional opener/bulk start is real.
+    ip_per_start = round(srng.choices(
+        [{1: 4.6, 2: 5.0, 3: 5.4, 4: 5.9, 5: 6.4}[tier] + srng.uniform(-0.5, 0.5),
+         srng.uniform(1.0, 2.5)], weights=[0.9, 0.1])[0], 2)
     return {
+        "pitcher_k_pct": k_pct,
+        "pitcher_bb_pct": bb_pct,
+        "pitcher_fip": fip,
+        "pitcher_era": era,
+        "sp_ip_per_start": ip_per_start,
         "pitcher_name": name,
         "pitcher_throws": throws,
         "pitcher_tier": tier,

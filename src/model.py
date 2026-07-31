@@ -199,12 +199,17 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
         # A +0.030 wOBA 3rd-time penalty on a leadoff bat ~ +6% HR mult.
         sp_mult *= float(np.clip(1.0 + float(tto) * reach * 2.0, 0.94, 1.10))
 
-    # Bullpen exposure: ~35% of expected PAs come after the starter departs.
-    # Gentler slope than the starter (relief HR/9 is noisier).
+    # Bullpen exposure, weighted by how much of THIS hitter's night is actually
+    # spent facing the starter. The old fixed 65/35 blend priced an opener the
+    # same as a 7-inning arm; the real split comes from the starter's IP/GS and
+    # the hitter's spot in the order.
+    from .lineup import pa_split
+    split = pa_split(row.get("lineup_spot"), row.get("sp_ip_per_start"))
+    sp_share = float(split["sp_share"])
     pen_hr9 = row.get("bullpen_hr9")
     if pen_hr9 is not None and pen_hr9 == pen_hr9:
         pen_mult = float(np.clip(0.92 + (float(pen_hr9) - 0.9) * 0.20, 0.86, 1.14))
-        blended = 0.65 * sp_mult + 0.35 * pen_mult
+        blended = sp_share * sp_mult + (1.0 - sp_share) * pen_mult
     else:
         blended = sp_mult
 

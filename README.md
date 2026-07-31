@@ -472,6 +472,16 @@ posted lineup -> PA-weighted xwOBA -> runs above/below league average
 more trips than the 9-hole (`SPOT_PA_SHARE`), so the same .380-xwOBA bat is
 worth measurably more hitting first than seventh.
 
+**The staff, not just its home runs.** The starter is graded on **K%** (the
+primary run-suppression lever — a punched-out hitter can't advance a runner or
+find a hole), **BB%**, **FIP** (over ERA: it strips the defense and sequencing
+luck that make a season ERA a poor guide to tonight), barrel% allowed, and velo
+off his own baseline. The bullpen gets **ERA and K%** alongside HR/9. And
+**IP/GS** sets how much of the game he actually covers, so a 6.5-inning arm and
+an opener aren't priced as the same start. Before this the model knew only HR/9
+and barrel% allowed — it could not tell a 30%-strikeout arm from a 15% one,
+which is why projected totals spread **0.56** runs against reality's **4.54**.
+
 **Runs, not home runs.** Park **run** factors are a separate bundled column
 (`run_factor` in `data/park_factors.csv`) and they deliberately disagree with the
 HR factors, because the two questions are different:
@@ -505,6 +515,31 @@ on **relative** lineup strength (`center_to_league=True`).
 **⭐ Game of the Day** scores side edge and total edge together, damped by how
 much of the projection is built on real posted lineups and real starter
 peripherals, so a big projected margin off two half-filled lineups can't win it.
+
+#### The starter/bullpen PA split (HR side)
+
+`expected_pa` used to depend on **lineup spot alone**, and the HR matchup blended
+starter and bullpen at a fixed 65/35 — pricing an opener exactly like a
+seven-inning arm. `lineup.pa_split()` now divides a hitter's trips using the
+starter's real IP/GS: against an arm who works into the 7th you get ~2.5 cracks
+at him and ~1.5 at the pen; against an opener most of your night is relievers,
+which is a different matchup wearing the same starter's name.
+
+#### Point-in-time season stats
+
+Backfilled rows used to look up season stats **as of today**, so a June graded
+day carried the hitter's end-of-July line — the same class of contamination as
+the recent-form leak, milder but spread across every batted-ball feature at
+once. `statcast.get_season_batter_table_as_of()` rebuilds the season-to-date
+line from pitch-level Statcast, strictly before the game date.
+
+Rebuilding a whole season per graded day would be ruinous, so the season is
+pulled **one month at a time and cached**: any date is (whole cached months) +
+(one partial month), and the backfill's second date onward costs almost nothing.
+Live picks skip this entirely — today's "as of now" already *is* as of today.
+Plate-discipline rates (whiff, chase, zone contact) exist only on the FanGraphs
+line and still carry the mild lookahead; they're the least outcome-coupled
+fields in the profile.
 
 #### Score-predictor feedback loop
 
