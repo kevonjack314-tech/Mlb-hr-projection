@@ -301,46 +301,6 @@ def fetch_game_hr_details(game_pk) -> tuple:
     return tuple(out)
 
 
-@lru_cache(maxsize=8)
-def fetch_final_scores(date_iso: str) -> tuple:
-    """Real final scores for every COMPLETED game on a date.
-
-    One StatsAPI schedule call for the whole slate — much lighter than pulling a
-    box score per game. Games still in progress, postponed or suspended are
-    skipped: a projection can only be graded against a finished game.
-
-    Each dict: home/away abbr, runs, innings played, and the game_pk.
-    """
-    data = _get_json(SCHEDULE_URL, {"sportId": 1, "date": date_iso,
-                                    "hydrate": "linescore,team"})
-    if not data or not data.get("dates"):
-        return ()
-    out = []
-    for d in data["dates"]:
-        for g in d.get("games", []):
-            state = ((g.get("status") or {}).get("abstractGameState") or "")
-            detail = ((g.get("status") or {}).get("detailedState") or "")
-            if state != "Final" or "Suspended" in detail:
-                continue
-            home = _TEAM_ID_TO_ABBR.get(g["teams"]["home"]["team"].get("id"))
-            away = _TEAM_ID_TO_ABBR.get(g["teams"]["away"]["team"].get("id"))
-            if not home or not away:
-                continue
-            hr_ = g["teams"]["home"].get("score")
-            ar = g["teams"]["away"].get("score")
-            if hr_ is None or ar is None:
-                continue
-            ls = g.get("linescore") or {}
-            out.append({
-                "game_pk": g.get("gamePk"),
-                "home_team": home, "away_team": away,
-                "home_runs": int(hr_), "away_runs": int(ar),
-                "innings": int(ls.get("currentInning") or 9),
-                "game": f"{away} @ {home}",
-            })
-    return tuple(out)
-
-
 @lru_cache(maxsize=2048)
 def fetch_game_box_hrs(game_pk) -> tuple:
     """Return the real HR hitters from a completed game's box score.

@@ -1,7 +1,6 @@
-"""Prop ladder — bet-type suitability, cash probabilities, and decision tree.
+"""ULX prop ladder — bet-type suitability, cash probabilities, and decision tree.
 
-Not every bat is a home-run bet. This grades each hitter for the prop that
-actually fits his profile:
+Instilled from the ULX syllabus / betting-syllabus infographics:
 
 THE BETTING PYRAMID ("don't get stuck on HRs"): a smart card is ~10% home runs,
 ~20% extra-base hits, ~25% total bases, ~25% stolen bases, ~20% volume
@@ -24,7 +23,7 @@ THE DECISION TREE: elite HR profile? → HR. Hits doubles? → 2B. On base often
 LINEUP-SPOT ROLES (what managers look for): 1 leadoff (OBP+speed), 2 table
 setter, 3 run producer (best all-around), 4 power, 5 secondary power,
 6 flex, 7 lower-order threat (underrated pop), 8 defense, 9 table re-setter.
-Runs live at the top of the order; RBIs in the 3-5 traffic; the "hidden
+Runs live at the top of the order; RBIs in the 3-5 traffic; the ULX "hidden
 value zone" is 7-9.
 """
 
@@ -42,7 +41,7 @@ BET_LABEL = {
     "R": "🔷 Run Scored", "RBI": "🟪 RBI", "2B": "🟧 Double", "SB": "🏃 Stolen Base",
 }
 
-# Approx league cash rates per bet type (midpoints).
+# Approx league cash rates from the ULX pyramid (midpoints).
 BASE_CASH_RATE = {"H": 0.72, "TB": 0.58, "R": 0.55, "RBI": 0.50,
                   "SB": 0.35, "2B": 0.30}
 # Ceilings so estimates stay honest.
@@ -80,7 +79,7 @@ def _spot_fit(row, bet):
 
 
 def suitability(row: pd.Series) -> dict:
-    """0-100 fit for each bet type, from the measured drivers of each prop."""
+    """0-100 fit for each bet type, from the ULX cheat-sheet drivers."""
     out = {}
     # Hits: high contact + high OBP-ish + hard hit.
     out["H"] = 100 * (0.32 * _norm(row, "contact_pct", 68, 88)
@@ -115,17 +114,14 @@ def suitability(row: pd.Series) -> dict:
     if speed < 0.25:            # not a runner — SB prop is dead
         sb *= 0.3
     out["SB"] = sb
-    # HR: the model's own measured power quality + its game HR probability.
-    pq = row.get("power_quality_score")
-    hp = row.get("hr_prob_game")
-    pq = float(pq) if pd.notna(pq) else 50.0
-    hp_score = float(np.clip((float(hp) if pd.notna(hp) else 0.10) / 0.30, 0, 1) * 100)
-    out["HR"] = 0.55 * pq + 0.45 * hp_score
+    # HR: the ULX power checklist already grades this (ulx_score 0-100).
+    v = row.get("ulx_score")
+    out["HR"] = float(v) if pd.notna(v) else 50.0
     return {k: round(float(np.clip(v, 0, 100)), 1) for k, v in out.items()}
 
 
 def cash_prob(bet: str, suit: float, row: pd.Series) -> float:
-    """Estimated cash probability: league baseline scaled by suitability."""
+    """Estimated cash probability: ULX baseline scaled by suitability."""
     if bet == "HR":
         p = row.get("hr_prob_game")
         return float(p) if pd.notna(p) else 0.10
@@ -135,10 +131,10 @@ def cash_prob(bet: str, suit: float, row: pd.Series) -> float:
 
 
 def best_bet(row: pd.Series, suits: dict) -> tuple[str, str]:
-    """Best bet by measured signal: HR → 2B → Runs → SB → Hits/TB → Pass."""
-    p = row.get("hr_prob_game")
-    if pd.notna(p) and float(p) >= 0.15:
-        return "HR", f"Elite HR spot ({float(p)*100:.0f}% model HR chance)"
+    """The ULX decision tree: HR → 2B → Runs → SB → Hits/TB → Pass."""
+    checks = row.get("ulx_checks")
+    if pd.notna(checks) and checks >= 7:
+        return "HR", f"Elite HR profile ({int(checks)}/9 ULX checks)"
     if suits["2B"] >= 62:
         return "2B", "Gap power + line drives — doubles machine"
     spot_ok = _spot_fit(row, "R") >= 0.75
@@ -152,7 +148,7 @@ def best_bet(row: pd.Series, suits: dict) -> tuple[str, str]:
 
 
 def attach_props(df: pd.DataFrame) -> pd.DataFrame:
-    """Add per-bet-type suitability, est. cash prob/odds, and the best bet."""
+    """Add per-bet-type suitability, est. cash prob/odds, and the ULX best bet."""
     if df is None or df.empty:
         return df
     df = df.copy()
@@ -176,7 +172,7 @@ def attach_props(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# Risk-laddered mix for a 5-leg "ladder" ticket (top → base).
+# The ULX pyramid mix for a 5-leg "ladder" ticket (top → base).
 LADDER_COMPOSITION = [
     ("HR", "suit_HR"), ("2B", "suit_2B"), ("TB", "suit_TB"),
     ("SB", "suit_SB"), ("R", "suit_R"),
@@ -184,7 +180,7 @@ LADDER_COMPOSITION = [
 
 
 def build_ladder_parlay(df: pd.DataFrame, n_legs: int = 5) -> dict:
-    """A mixed-prop ticket across the risk ladder — one leg per bet type, different
+    """A mixed-prop ticket per the ULX pyramid — one leg per bet type, different
     games ("never bet the same thing in every game / don't chase just homers")."""
     if df is None or df.empty:
         return {"legs": pd.DataFrame(), "summary": {}}

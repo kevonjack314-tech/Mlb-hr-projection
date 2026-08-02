@@ -54,12 +54,6 @@ keeps the lineup HR log fresh.
    score + book edge), and **Top 3 Longshots** (🎯 under-the-radar ceiling), as
    cards with odds, tier, Barrel% / Hard-Hit% / FB% / HR-FB / Max EV and the
    model's rationale. No player appears twice across the three lists.
-0b. **🔮 Score Predictor** (🎯 Picks → Score Predictor) — a **projected final
-   score for every game on the slate**, plus a **⭐ Game of the Day** (also shown
-   on the 🏠 Today tab). Each game gets expected runs per side, a most-likely
-   total, win probability with vig-free fair odds, an Over/Under read on the
-   line, and the HR model's favorite bat in that game. See
-   [Score prediction](#score-prediction-projected-final-scores).
 1. **🚀 Best Longshots** — high-upside, boom-or-bust bats ranked by an
    *explosiveness* score (max EV + barrel% + favorable park/weather). Good for
    +EV HR props and DFS tournaments. Includes vig-free fair odds.
@@ -86,11 +80,11 @@ keeps the lineup HR log fresh.
    decile), the hottest HR parks, **HRs-by-lineup-spot**, a **Profile Match %** for
    today's bats, and the **Top-5 list in each category**.
 6. **🎰 Parlay Builder** — builds **1–5 leg HR parlays with roles, not names** (the
-   model): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
+   ULX formula): an **⚓ Anchor** (highest-confidence bat, bats 3-5), **💰 Value**
    bats (underpriced profiles, 6-7), and **🚀 Deep-Space Longshots** (overlooked
    ceiling, 7-9), diversified across games, archetypes **and lineup spots** and
-   graded on a 12-point data checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
-   win %, and **EV**, plus a "build your own" mode. Strategies: Model-driven,
+   graded on an 11-point checklist with a 🟢/🟡/🔴 light. Shows combined odds, model
+   win %, and **EV**, plus a "build your own" mode. Strategies: ULX role-based,
    Safest, Best-value (edge), Boom.
 7. **💎 Value Finder** — ranks the biggest **model-vs-book edges** (positive
    **Edge%** = +EV), filterable by role / probability / live-only, with a one-click
@@ -137,7 +131,7 @@ Every hitter carries a **lineup spot (1–9)** — live from the posted batting 
 when available, else estimated. It feeds the model three ways:
 - **Expected PA by spot** (top of order bats more, ~4.6 → 3.7 PA) folds directly
   into the per-game HR probability.
-- **Role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
+- **ULX role fit** — the parlay builder fits Anchors to 3-5, Value to 6-7,
   Longshots to 7-9, and checks "different lineup spots".
 - **SP HRs@Spot** — each hitter is tagged with how many HRs the opposing starter
   has allowed to *their* lineup spot over his last 10 games; bats in a vulnerable
@@ -158,44 +152,35 @@ when available, else estimated. It feeds the model three ways:
 
 ### The prop ladder & betting pyramid (instilled)
 
-`src/props.py` grades every bat for the prop that fits — *"don't get stuck on HRs"*:
+`src/props.py` encodes the ULX betting syllabus — *"don't get stuck on HRs"*:
 - **Bet-type suitability (0–100)** per hitter for **HR · Total Bases · Hits ·
-  Runs · RBIs · Doubles · Stolen Bases**, from the measured drivers
+  Runs · RBIs · Doubles · Stolen Bases**, from the ULX cheat-sheet drivers
   (e.g. TB = hits+power+lineup position; SB = sprint speed gates everything;
   R = top of the order + on-base; RBI = 3-5 traffic + slug) and the
   **manager's lineup-spot roles** (leadoff sets the table, 3-4 heart of order,
   7-9 hidden value zone).
-- **Estimated cash %** per bet type = league hit-rate baselines
+- **Estimated cash %** per bet type = the ULX hit-rate pyramid baselines
   (Hits 70-80% … HR 8-15%) scaled by the bat's fit (HR uses the real model
   probability). Labeled as estimates.
-- **Best Bet decision tree** per player: elite model HR spot → HR, else
+- **ULX Best Bet decision tree** per player: elite HR profile → HR, else
   doubles → Runs → SB → Hits/TB, else **pass the player**.
 - **🪜 Mixed Ladder** in the Parlays tab: one leg per bet type from different
   games, mirroring the pyramid mix (~10% HR / XBH / TB / SB / volume base).
-- **Fade recency** is structural: underlying quality carries
+- **Fade recency** (ULX 106) is already structural: underlying quality carries
   the biggest weight (0.34) while recent form is capped and only 0.16.
 
-### What drives the picks (data, not a checklist)
+### ULX methodology (instilled)
 
-There is **no hand-written scoring checklist** anywhere in the pick path. Every
-leg, every featured pick and every ranking comes from measured signal plus the
-model's own graded track record:
-
-- **Measured inputs** — Statcast batted-ball quality and bat tracking, batted-ball
-  mix, plate discipline, expected stats, 14-day contact-quality *trend*, real
-  platoon splits, fence geometry vs the hitter's pull side, the starter's
-  meatball rate / velo trend / 3rd-time-through penalty / hitter's-count
-  predictability, bullpen exposure, park + weather + start time, lineup spot,
-  fatigue, series familiarity, and batter-vs-pitcher history.
-- **The graded record** — a self-calibrating probability curve, per-role
-  reliability factors, and a **learned feature model** that re-weights every one
-  of those inputs from real outcomes (see the 🏅 Record view's importance panel).
-- **Parlay composition follows the record, not a playbook.** Value legs have
-  beaten their predicted hit rate in the graded log while longshot legs have
-  badly missed theirs, so the default ticket is ⚓ Anchor + 💰 Value(s) and does
-  **not** force a longshot in. `strategy="boom"` is there if you want one.
-- **HR environment** — wind out, warm temps, hitter park, and a homer-prone /
-  fly-ball starter; flagged per game in the Lineups tab (`src/parks.py`).
+The model encodes the ULX playbook ("bet the profile, not the name") in `src/ulx.py`:
+- **Power checklist** — each bat is graded 🟢/🟡/🔴 on 9 minimums: Barrel% ≥ 8,
+  Hard-Hit% ≥ 40, xSLG ≥ .450, ISO ≥ .160, Sweet-Spot% ≥ 30, Avg EV ≥ 88, Launch
+  10–28°, Pull% ≥ 35, HR/FB ≥ 12. The check count (**ULX ✓**) is the backbone of the
+  Longshot score and boosts Value/Longshot legs in parlay selection.
+- **Platoon is the first filter** (already in the matchup), with a **same-handed
+  smasher** exception (elite power that homers regardless of handedness).
+- **Longshots bat 5–9** (overlooked) in the parlay role-fit.
+- **HR environment / "🔥 HR Hunting Mode"** — wind out, warm temps, hitter park, and
+  a homer-prone / fly-ball starter; flagged per game in the Lineups tab.
 
 ### 🤖 Daily self-improvement (gets more accurate every day)
 
@@ -380,24 +365,8 @@ The **power-quality** sub-score is itself a weighted blend
 Max EV **0.15**, Avg EV **0.10**. Barrel rate gets the most weight because it is
 the single best public predictor of home-run output.
 
-**Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.30**,
-15-day **0.35**, 30-day **0.35** — deliberately *not* front-loaded on the hottest
-window. Measured leak-free against the graded record, a hitter with **zero** HR in
-the prior week still homers at **0.90×** the league rate today, and one HR at
-**1.01×** — the "he's hot" week is close to noise until you get to 3+ HR (~1.7×,
-thin sample). The scored form value is then shrunk toward neutral by tier
-(`FORM_SHRINK`): **0.35** for stars (≥18 HR — their streaks measured essentially
-flat: 0.93× / 1.05× / 1.04×), **0.70** mid, **1.00** under-the-radar bats, where a
-hot week is partly a talent signal the season line hasn't caught up to.
-
-> **Leakage guard.** The rolling windows are built strictly *before* the game date.
-> They previously ran through it, so grading a past day fed that day's own home run
-> into its own "recent form" — which is why the learned model had piled ~43% of its
-> weight onto two features and still "beat" a holdout that leaked identically.
-> `tuning.leakage_report()` now checks the graded record on every fit (an honest
-> 7-day window must read exactly 0 on plenty of HR days), and `fit_feature_model()`
-> refuses to activate on a log that trips it. Re-grade with
-> `backfill_eval.py … --regrade` after any feature-window change.
+**Recent form** weights the windows (`RECENT_FORM_WEIGHTS`): 7-day **0.50**,
+15-day **0.30**, 30-day **0.20** — the hottest, most recent signal counts most.
 
 **Expected HR & regression.** A season **xHR** is computed from batted-ball quality
 (Barrels/PA, with a fly-ball term) × PA. The **HR − xHR** gap flags over- and
@@ -453,80 +422,6 @@ pitcher faced with a platoon advantage is the juiciest matchup.
   baseline.
 - **Humidity** — a small second-order carry effect (humid air is slightly less
   dense).
-
-### Score prediction (projected final scores)
-
-`src/gamescore.py` projects a **final score for every game** from data the HR
-model already pulls — nothing extra is fetched. Per side:
-
-```
-posted lineup -> PA-weighted xwOBA -> runs above/below league average
-  x opposing starter   (HR/9, barrel% allowed, velo off his own baseline)
-  x opposing bullpen   (the ~42% of innings the starter won't cover)
-  x park RUN factor    (NOT the HR factor)
-  x weather            (the HR weather model, damped to runs)
-                                                        = expected runs
-```
-
-**Lineup quality is PA-weighted by batting order.** The leadoff spot gets ~22%
-more trips than the 9-hole (`SPOT_PA_SHARE`), so the same .380-xwOBA bat is
-worth measurably more hitting first than seventh.
-
-**Runs, not home runs.** Park **run** factors are a separate bundled column
-(`run_factor` in `data/park_factors.csv`) and they deliberately disagree with the
-HR factors, because the two questions are different:
-
-| Park | HR factor | Run factor | Why they split |
-|---|---|---|---|
-| Fenway (BOS) | **96** (90 vs RHB) | **108** | The Monster turns fly balls into doubles |
-| Kauffman (KC) | **92** | **105** | Suppresses HR; all that grass is doubles/triples |
-| Yankee Stadium | **110** (121 vs LHB) | **101** | The short porch is a HR effect, not a runs effect |
-| Coors (COL) | **114** | **128** | Both — carry *and* the biggest outfield in baseball |
-
-**Scoring is not Poisson.** Innings are correlated (rallies), so real team-game
-scoring has much fatter tails than a coin-flip model assumes. Runs go through a
-**negative binomial** with `RUN_DISPERSION = 2.2`, which reproduces the real
-variance (9.72 vs ~9.7) and the P(≤2 runs) shape (0.30 vs ~0.29). Poisson would
-say a 4.45-run offense gets shut out 1.1% of the time; the real number is ~7%.
-
-The two distributions are convolved to give **win probability**, the full
-**total-runs distribution**, and an **Over/Under** read on any line. Regulation
-ties break by extra innings *in proportion to each side's scoring rate* — the
-better offense wins more extra-inning games — with the home team's last-at-bat
-edge folded in. Fair odds carry **no vig**, so an edge only exists when the book
-hangs a longer price than the fair number.
-
-**Slate re-centering.** If the feed only resolves the bats it has Statcast rows
-for, every posted lineup reads ~.340 xwOBA and every game projects as a 12-run
-track meet. Twenty teams are not all above average on the same night — that's a
-coverage artifact — so the slate is re-centered on the league and the model runs
-on **relative** lineup strength (`center_to_league=True`).
-
-**⭐ Game of the Day** scores side edge and total edge together, damped by how
-much of the projection is built on real posted lineups and real starter
-peripherals, so a big projected margin off two half-filled lineups can't win it.
-
-#### Score-predictor feedback loop
-
-Every projection is graded against the real final line score (MLB StatsAPI) by
-the daily job and logged to `data/game_eval_log.csv` (`src/gamegrade.py`), so
-the model's accuracy is measured rather than assumed:
-
-- **Runs MAE**, per side and on the total, plus the **bias** (is it projecting
-  too many runs, and where — `total_bias_by_park` surfaces parks whose run
-  factor has gone stale as a persistent one-sided miss).
-- **Winner accuracy vs an honest baseline.** "Picks winners 54%" means nothing
-  until you know that blindly taking the home team went 52%. Both numbers are
-  shown, and so is a moneyline **Brier** against the base-rate baseline.
-- **Win-probability calibration** by bucket — a model can pick winners at a
-  fine clip and still be badly miscalibrated, which is what turns a real edge
-  into a losing ticket once you're paying a price for it.
-- **Over/Under lean** accuracy (pushes excluded) and the **⭐ Game of the Day**
-  hit rate tracked separately.
-
-The record renders at the bottom of 🎯 Picks → 🔮 Score Predictor, and it says
-so in red when the model is **not** beating its baselines. Backfill or re-grade
-with `python scripts/grade_games.py [END_DATE] [DAYS] [--regrade]`.
 
 ### 5. Trailing-month backtest & profile matching
 
@@ -607,17 +502,15 @@ modeled slates so the whole analysis runs without network.
 ├── app.py                  # Streamlit UI: tabs, filters, charts, CSV export
 ├── requirements.txt
 ├── data/
-│   └── park_factors.csv    # 30-park HR + RUN factors, dimensions, lat/lon, roof
+│   └── park_factors.csv    # 30-park HR factors, dimensions, lat/lon, roof
 ├── src/
-│   ├── parks.py            # park HR + RUN factors, wind / temp / humidity
-│   ├── gamescore.py        # projected final scores, win prob, totals, GOTD
-│   ├── gamegrade.py        # score-predictor record: MAE, calibration, baselines
+│   ├── parks.py            # park / wind / temp / humidity multipliers
 │   ├── model.py            # composite scoring + probability (weights as constants)
 │   ├── demo.py             # deterministic synthetic slate (offline fallback)
 │   ├── statcast.py         # real Statcast/FanGraphs season + recent-form pulls
 │   ├── odds.py             # live HR odds (The Odds API) + tier-banded model fallback
 │   ├── trends.py           # Trends Lab: player tiers + 12 HR pattern detectors
-│   ├── parlay.py           # model/record-driven 1-5 leg HR parlay generator
+│   ├── parlay.py           # ULX role-based 1-5 leg HR parlay generator (tier-aware)
 │   ├── lineup.py           # lineup-spot expected-PA, role fit, recurring HR log
 │   ├── pitchers.py         # probable-SP HRs allowed by lineup spot (last 10 games)
 │   ├── learn.py            # self-calibration: HR rate by model rating
