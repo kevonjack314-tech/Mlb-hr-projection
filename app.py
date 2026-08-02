@@ -178,9 +178,11 @@ GLOSSARY = {
     "Longshot": "Boom-or-bust ceiling score: max exit velo + barrel% + park/weather, rewarding high-variance upside.",
     "Consistency": "High-floor score: hard-hit%, contact (low K), season HR rate, EV & xwOBA, weighted by sample size.",
     "Sneaky": "Under-the-radar value: strong matchup/park + recent surge vs season line + lower-profile bat.",
-    "ISO": "Isolated power (SLG − AVG) — raw power output.",
-    "Sweet-Spot%": "Share of batted balls in the 8-32° launch-angle sweet spot (real, Statcast).",
-    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor).",
+    "ULX": "ULX power-checklist grade — 🟢 GREEN (≥7 of 9 minimums met, run it), 🟡 YELLOW (4-6, consider), 🔴 RED (<4, fade). Bet the profile, not the name.",
+    "ULX ✓": "How many of the 9 ULX power minimums the bat meets: Barrel%≥8, Hard-Hit%≥40, xSLG≥.450, ISO≥.160, Sweet-Spot%≥30, AvgEV≥88, Launch 10-28°, Pull%≥35, HR/FB≥12.",
+    "ISO": "Isolated power (SLG − AVG) — raw power output. ULX longshot minimum ≥ .160.",
+    "Sweet-Spot%": "Share of batted balls in the 8-32° launch-angle sweet spot (real, Statcast). ULX minimum ≥ 30%.",
+    "Barrel%": "Share of batted balls hit with the ideal EV/launch-angle combo for extra-base damage (best HR predictor). ULX minimum ≥ 8%.",
     "Barrel/PA%": "Barrels per plate appearance (real, Statcast) — barrel rate scaled by how often the bat puts a ball in play; an elite season-long HR signal.",
     "xHR (season)": "Season expected home runs from batted-ball quality (barrels/PA + fly-ball rate). The gap vs actual HR flags luck/regression.",
     "HR−xHR": "Actual HR minus expected HR. Negative = under-performing the quality of contact (a positive-regression / 'due' candidate, used in the Sneaky score).",
@@ -361,6 +363,8 @@ DISPLAY_COLUMNS = {
     "position": "Pos",
     "lineup_spot": "Spot",
     "player_tier": "Tier",
+    "ulx_grade": "ULX",
+    "ulx_checks": "ULX ✓",
     "hr_score": "HR Score",
     "calibrated_score": "Calibrated",
     "profile_match": "Profile Match",
@@ -434,6 +438,7 @@ DISPLAY_COLUMNS = {
 # view shows everything. The active headline/sort column is always added back.
 ESSENTIAL_KEYS = {
     "player", "team", "opponent", "pitcher_name", "lineup_spot", "player_tier",
+    "ulx_grade", "ulx_checks",
     "hr_score", "hr_prob_game", "calibrated_hr_prob", "cal_edge_pct",
     "book_odds", "edge_pct", "fair_odds",
     "longshot_score", "consistency_score", "sneaky_score",
@@ -460,6 +465,8 @@ COLUMN_CONFIG = {
     "vs-Hand wOBA": st.column_config.NumberColumn("vs-Hand wOBA", help=GLOSSARY["vs-Hand wOBA"], format="%.3f"),
     "Opp Pen HR/9": st.column_config.NumberColumn("Opp Pen HR/9", help=GLOSSARY["Opp Pen HR/9"], format="%.2f"),
     "Game Total": st.column_config.NumberColumn("Game Total", help=GLOSSARY["Game Total"], format="%.1f"),
+    "ULX": st.column_config.TextColumn("ULX", help=GLOSSARY["ULX"]),
+    "ULX ✓": st.column_config.NumberColumn("ULX ✓", help=GLOSSARY["ULX ✓"], format="%d/9"),
     "ISO": st.column_config.NumberColumn("ISO", help=GLOSSARY["ISO"], format="%.3f"),
     "Sweet-Spot%": st.column_config.NumberColumn("Sweet-Spot%", help=GLOSSARY["Sweet-Spot%"], format="%.1f"),
     "xHR (game)": st.column_config.NumberColumn("xHR (game)", help=GLOSSARY["xHR (game)"], format="%.2f"),
@@ -632,7 +639,8 @@ def _top3_card(rank_emoji: str, row: pd.Series, headline: str, headline_val: str
             f"Hard-Hit% **{_fmt(row.get('hard_hit_pct'))}** · "
             f"FB% **{_fmt(row.get('fb_pct'))}** · "
             f"HR/FB **{_fmt(row.get('hr_fb'))}** · "
-            f"Max EV **{_fmt(row.get('max_ev'))}**"
+            f"Max EV **{_fmt(row.get('max_ev'))}** · "
+            f"ULX {row.get('ulx_grade','—')}"
         )
         if row.get("rationale"):
             st.caption(f"💡 {row['rationale']}")
@@ -650,7 +658,7 @@ def _team_pick_line(rank: str, row: pd.Series) -> None:
                 f"  \n<span style='opacity:0.75;font-size:0.85em'>"
                 f"{row.get('player_tier','')}{spot_txt} · HR Score {row.get('hr_score',0):.0f} · "
                 f"Barrel% {_fmt(row.get('barrel_pct'))} · HR/FB {_fmt(row.get('hr_fb'))} · "
-                f"Max EV {_fmt(row.get('max_ev'))}{bvp_txt}</span>",
+                f"Max EV {_fmt(row.get('max_ev'))} · ULX {row.get('ulx_grade','—')}{bvp_txt}</span>",
                 unsafe_allow_html=True)
     if row.get("rationale"):
         st.caption(f"💡 {row['rationale']}")
@@ -707,7 +715,7 @@ def tab_by_matchup(df: pd.DataFrame):
     show_cols = [c for c in ["game", "team", "opponent", "player", "player_tier",
                              "lineup_spot", "pitcher_name", "hr_prob_game",
                              "hr_score", "book_odds", "barrel_pct", "hr_fb",
-                             "max_ev", "rationale"] if c in picks.columns]
+                             "max_ev", "ulx_grade", "rationale"] if c in picks.columns]
     export = picks[show_cols].copy()
     if "hr_prob_game" in export.columns:
         export["hr_prob_game"] = (export["hr_prob_game"] * 100).round(0)
@@ -715,222 +723,6 @@ def tab_by_matchup(df: pd.DataFrame):
                        export.to_csv(index=False).encode(),
                        file_name="top2_by_team.csv", mime="text/csv",
                        key="dl_top2_team")
-
-
-def _score_card(row: pd.Series, headline: bool = False) -> None:
-    """One game's projected final score, win probability and total."""
-    away, home = row["away_team"], row["home_team"]
-    ar, hr_ = float(row["away_runs_exp"]), float(row["home_runs_exp"])
-    fav_home = row["winner"] == home
-    a_style = "font-weight:700" if not fav_home else "opacity:0.7"
-    h_style = "font-weight:700" if fav_home else "opacity:0.7"
-    size = "1.7em" if headline else "1.25em"
-    st.markdown(
-        f"<div style='font-size:{size};line-height:1.35'>"
-        f"<span style='{a_style}'>{away} {ar:.1f}</span>"
-        f"<span style='opacity:0.5'> &nbsp;–&nbsp; </span>"
-        f"<span style='{h_style}'>{home} {hr_:.1f}</span></div>"
-        f"<div style='opacity:0.75;font-size:0.9em'>"
-        f"projected total <b>{float(row['total_exp']):.1f}</b> · most likely "
-        f"<b>{int(row['most_likely_total'])}</b> runs · "
-        f"{row['winner']} <b>{float(row['win_prob'])*100:.0f}%</b> "
-        f"({int(row['fair_odds']):+d} fair) · {row['total_lean']} "
-        f"{row['total_line']} at {float(row['total_lean_prob'])*100:.0f}%</div>",
-        unsafe_allow_html=True)
-
-
-def tab_game_scores(df: pd.DataFrame):
-    """Projected final score for every game, plus the game I like most."""
-    from src.gamescore import (
-        attach_top_bat, best_bets, game_of_the_day, predict_games,
-    )
-    st.subheader("🔮 Score Predictor — every game")
-    st.caption(
-        "A projected **final score for every game on the slate**, built from the "
-        "same data the HR model runs on: each posted lineup's PA-weighted xwOBA "
-        "(the leadoff spot gets ~22% more trips than the 9-hole, so spot "
-        "matters), the opposing starter's HR/9 and barrel% allowed, the "
-        "opposing bullpen for the innings the starter won't cover, the park's "
-        "**run** factor — *not* its HR factor — and the weather. Runs then go "
-        "through a negative-binomial distribution, because real scoring has far "
-        "fatter tails than a coin-flip model assumes."
-    )
-    if df.empty or "game" not in df.columns:
-        st.warning("No games on the slate.")
-        return
-
-    games = attach_top_bat(predict_games(df), df)
-    if games.empty:
-        st.warning("Not enough lineup data to project scores yet.")
-        return
-
-    gotd = game_of_the_day(games)
-    if gotd is not None:
-        with st.container(border=True):
-            st.markdown("### ⭐ Game of the Day")
-            _score_card(gotd, headline=True)
-            st.markdown(f"**My play: {gotd['gotd_bet']}**")
-            st.caption(f"💡 {gotd['rationale']}")
-            if gotd.get("top_bat"):
-                st.caption(f"⚾ Best HR bat in this game: **{gotd['top_bat']}** "
-                           f"({gotd.get('top_bat_team','')}) — "
-                           f"{gotd.get('top_bat_hr_pct','?')}% to go deep")
-
-    st.markdown("#### 🎯 The three games I like most")
-    picks = best_bets(games, 3)
-    cols = st.columns(len(picks)) if len(picks) else []
-    for col, (_, row) in zip(cols, picks.iterrows()):
-        with col, st.container(border=True):
-            st.markdown(f"**{row['game']}**")
-            _score_card(row)
-            st.markdown(f"🏆 {row['pick']}  \n📊 {row['total_pick']}")
-            st.caption(f"confidence {float(row['confidence']):.0f}/100")
-
-    st.markdown("#### 📋 Full board")
-    for _, row in games.iterrows():
-        with st.container(border=True):
-            c1, c2 = st.columns([3, 2])
-            with c1:
-                st.markdown(f"**{row['game']}**")
-                _score_card(row)
-            with c2:
-                st.markdown(
-                    f"<div style='font-size:0.85em;opacity:0.8'>"
-                    f"Lineups (xwOBA): {row['away_team']} "
-                    f"<b>{row['away_lineup_xwoba']:.3f}</b> · {row['home_team']} "
-                    f"<b>{row['home_lineup_xwoba']:.3f}</b><br>"
-                    f"Park runs <b>{float(row['park_run_mult']):.2f}x</b> · "
-                    f"weather <b>{float(row['weather_run_mult']):.2f}x</b><br>"
-                    f"Confidence <b>{float(row['confidence']):.0f}</b>/100 · "
-                    f"data {float(row.get('data_quality_pct', 0)):.0f}%"
-                    + (f"<br>⚾ top HR bat: <b>{row['top_bat']}</b>"
-                       if row.get("top_bat") else "")
-                    + "</div>", unsafe_allow_html=True)
-
-    export_cols = [c for c in ["game", "away_team", "home_team", "away_runs_exp",
-                               "home_runs_exp", "total_exp", "most_likely_total",
-                               "winner", "win_prob", "fair_odds", "total_line",
-                               "p_over", "p_under", "total_lean", "confidence",
-                               "away_lineup_xwoba", "home_lineup_xwoba",
-                               "park_run_mult", "weather_run_mult", "top_bat"]
-                   if c in games.columns]
-    st.download_button("⬇️ Export projected scores to CSV",
-                       games[export_cols].to_csv(index=False).encode(),
-                       file_name="projected_scores.csv", mime="text/csv",
-                       key="dl_game_scores")
-    st.caption(
-        "Win probability comes from convolving the two run distributions; "
-        "regulation ties are broken by extra innings in proportion to each "
-        "side's scoring rate. Fair odds carry **no vig** — a book's price on "
-        "the same side will be worse, so an edge only exists when the book is "
-        "longer than the fair number shown."
-    )
-    st.divider()
-    _render_score_record()
-
-
-def _render_score_record():
-    """How the score predictor has ACTUALLY done, against honest baselines."""
-    from src.gamegrade import (
-        game_record, load_game_log, total_bias_by_park, win_prob_calibration,
-    )
-    st.markdown("#### 📏 How this model has actually done")
-    log = load_game_log()
-    rec = game_record(log)
-    if not rec.get("n"):
-        st.info(
-            "No graded games yet. Every projection gets logged and scored "
-            "against the real final line score by the daily job — check back "
-            "once a day or two has settled. Until then, treat the numbers "
-            "above as untested."
-        )
-        return
-
-    st.caption(f"**{rec['n']:,}** games graded over **{rec['days']}** days, "
-               "against real MLB final scores.")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Runs MAE (per side)", f"{rec['mae_side']:.2f}")
-    c2.metric("Total MAE", f"{rec['mae_total']:.2f}")
-    c3.metric("Winner picked", f"{rec['winner_pct']:.0f}%",
-              f"{rec['winner_pct'] - rec['home_baseline_pct']:+.1f} vs always-home",
-              delta_color="normal")
-    c4.metric("Projected vs actual total",
-              f"{rec['avg_total_proj']:.1f} / {rec['avg_total_actual']:.1f}",
-              f"{rec['total_bias']:+.2f} runs bias", delta_color="off")
-
-    # The honest read. Four baselines, and every one of them has to clear.
-    side_txt = (f"winners **{rec['winner_pct']:.0f}%** vs "
-                f"**{rec['home_baseline_pct']:.0f}%** for blindly taking the home "
-                f"team · moneyline Brier **{rec['ml_brier']}** vs "
-                f"**{rec['ml_brier_baseline']}** base rate")
-    run_txt = (f"total MAE **{rec['mae_total']:.2f}** vs "
-               f"**{rec['mae_total_baseline']:.2f}** for just projecting the "
-               f"average every game")
-    verdict = rec.get("verdict")
-    if verdict == "unproven":
-        st.warning(
-            f"🟡 **Unproven — {rec['n']} games graded, needs ~250.** At this "
-            f"sample a few points either way is noise, so there's no verdict "
-            f"to give yet. Where it stands: {side_txt} · {run_txt}.")
-    elif verdict == "working":
-        st.success(f"🟢 Beating every baseline — {side_txt} · {run_txt}.")
-    elif verdict == "mixed":
-        st.warning(
-            f"🟡 Mixed — {side_txt} · {run_txt}. "
-            + ("The side picks clear their baselines but the run projections "
-               "don't, so trust the winner/total *lean* and not the projected "
-               "score itself." if rec.get("beats_home_baseline")
-               else "The run projections clear but the side picks don't."))
-    else:
-        st.error(f"🔴 Not beating the baselines — {side_txt} · {run_txt}. "
-                 "Treat these picks as unproven.")
-
-    # Spread is the tell a headline MAE can hide: a model that projects every
-    # game at ~9.2 runs will post a fine-looking MAE while saying nothing.
-    if rec.get("total_corr") is not None:
-        st.caption(
-            f"Projected totals spread **{rec['total_spread']:.2f}** runs vs "
-            f"**{rec['total_spread_actual']:.2f}** actual, correlation "
-            f"**{rec['total_corr']:+.2f}**. Game scoring is mostly noise so a "
-            "regressed projection is correct — but a *near-flat* one carries no "
-            "information, however good its MAE looks."
-        )
-
-    if rec.get("total_pct") is not None:
-        st.caption(f"Over/Under lean: **{rec['total_pct']:.0f}%** on "
-                   f"{rec['total_n']} graded (pushes excluded)."
-                   + (f" · ⭐ Game of the Day: **{rec['gotd_winner_pct']:.0f}%** "
-                      f"on {rec['gotd_n']} picks"
-                      if rec.get("gotd_winner_pct") is not None else ""))
-
-    cal = win_prob_calibration(log)
-    if not cal.empty:
-        st.markdown("**Win-probability calibration** — a 60% side should win 60% "
-                    "of the time. Picking winners is not the same as pricing them.")
-        st.dataframe(
-            cal.rename(columns={"games": "Games", "predicted": "Predicted %",
-                                "actual": "Actual %", "gap": "Gap"}),
-            hide_index=True, use_container_width=True,
-            column_config={
-                "Predicted %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Actual %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Gap": st.column_config.NumberColumn(
-                    format="%+.1f",
-                    help="Actual minus predicted. Positive = the model is "
-                         "underrating that bucket."),
-            })
-
-    park = total_bias_by_park(log)
-    if not park.empty:
-        with st.expander("🏟️ Total bias by park — where the run factors are stale"):
-            st.caption("Positive bias = the model projects **too many** runs at "
-                       "that park. A persistent one-sided miss is the signal to "
-                       "retune that park's run factor.")
-            st.dataframe(
-                park.rename(columns={"home_team": "Park (home team)",
-                                     "games": "Games", "bias": "Bias (runs)",
-                                     "mae": "MAE"}),
-                hide_index=True, use_container_width=True)
 
 
 def tab_top3(df: pd.DataFrame):
@@ -998,7 +790,7 @@ def tab_longshots(df: pd.DataFrame):
     st.markdown("##### Top 20 by Longshot Score")
     metric_bar_chart(df, "longshot_score", "Longshot Score", n=15)
     cols = ["player", "team", "opponent", "pitcher_name", "bats", "lineup_spot",
-            "longshot_score", "hr_prob_game", "book_odds",
+            "ulx_grade", "ulx_checks", "longshot_score", "hr_prob_game", "book_odds",
             "edge_pct", "sp_hr_at_spot", "max_ev", "barrel_pct", "iso",
             "sweet_spot_pct", "hr_fb", "pull_pct", "park_factor", "wind_mult", "rationale"]
     render_table(df.sort_values("longshot_score", ascending=False).head(40),
@@ -1179,7 +971,7 @@ def render_hr_stat_sheet(events, start_iso, end_iso):
             "Spot": st.column_config.NumberColumn("Spot", help=GLOSSARY["Spot"], format="%d"),
             "Model Score": st.column_config.ProgressColumn("Model Score", help="The model's pre-game HR Score (0-100) for this bat.", min_value=0, max_value=100, format="%.0f"),
             "Model HR%": st.column_config.NumberColumn("Model HR%", help="The model's pre-game ≥1 HR probability for this bat.", format="%.0f%%"),
-            "Role": st.column_config.TextColumn("Role", help="Tier band the model put them in pre-game (Anchor/Value/Longshot)."),
+            "Role": st.column_config.TextColumn("Role", help="ULX role the model put them in pre-game (Anchor/Value/Longshot)."),
             "Model take": st.column_config.TextColumn("Model take", help="Did the model like them pre-game? ✅ Loved / 👍 Liked / 😐 Lukewarm / ⚠️ Missed."),
             "Barrel%": st.column_config.NumberColumn("Barrel%", format="%.1f"),
             "Max EV": st.column_config.NumberColumn("Max EV", format="%.1f"),
@@ -1272,22 +1064,10 @@ def tab_pick_record():
 def _render_feature_importance():
     """Show which signals the LEARNED model actually weights — the black box,
     opened. Coefficients are on standardized features so they're comparable."""
-    from src.tuning import _load_tuning, feature_importance
+    from src.tuning import feature_importance
     fi = feature_importance(top_n=20)
     st.markdown("#### 🧠 What the learned model actually weights")
     if fi is None:
-        note = str((_load_tuning().get("feature_model") or {}).get("note", ""))
-        if "leakage" in note.lower():
-            st.warning(
-                "**Learned model disabled — target leakage found in the graded "
-                "record.** The 7/15/30-day HR-rate windows were built *through* "
-                "the game date, so a graded day's own home run was counted in "
-                "its own \"recent form\" — which is why the model had learned to "
-                "put ~43% of its weight there. The windows are fixed; picks are "
-                "running on the hand-tuned weights and the data until those "
-                "dates are re-graded."
-            )
-            return
         st.info("The learned feature model hasn't trained yet — it needs ~2,000 "
                 "graded hitter-days with the full feature vector. Until then the "
                 "hand-tuned weights drive the model. Check back as the record grows.")
@@ -1644,8 +1424,8 @@ def _render_parlay(result, stake, key: str = "parlay"):
         st.info(f"{light} · EV is {ev:+.0f}% on model-implied odds (you pay the hold). "
                 "Turn on live odds + shop books to find real +EV.")
 
-    # Data-driven quality checklist.
-    with st.expander(f"📋 Quality checks — {s['checks_passed']}/{s['checks_total']} · {light}", expanded=True):
+    # Checklist (ULX 10-point).
+    with st.expander(f"📋 ULX checklist — {s['checks_passed']}/{s['checks_total']} · {light}", expanded=True):
         cc = st.columns(2)
         for i, (label, ok) in enumerate(result["checklist"]):
             cc[i % 2].markdown(f"{'✅' if ok else '⬜'} {label}")
@@ -1659,18 +1439,18 @@ def _render_parlay(result, stake, key: str = "parlay"):
 
 def _hr_parlay_builder(df):
     st.caption(
-        "Build HR parlays from measured signal: an **⚓ Anchor** "
+        "Build HR parlays with **roles, not names** (the ULX formula): an **⚓ Anchor** "
         "(highest-confidence bat), **💰 Value** bats (underpriced profiles), and "
         "**🚀 Deep-Space Longshots** (overlooked ceiling). Diversified across games & "
-        "archetypes, graded on a data-driven checklist. *Research/entertainment only.*"
+        "archetypes, graded on the ULX checklist. *Research/entertainment only.*"
     )
 
     c1, c2, c3, c4 = st.columns(4)
     n_legs = c1.slider("Legs", 1, 5, 3)
     strategy = c2.selectbox(
         "Strategy",
-        ["model", "safe", "value", "boom"],
-        format_func={"model": "Model-driven (recommended)", "safe": "Safest (highest prob)",
+        ["ulx", "safe", "value", "boom"],
+        format_func={"ulx": "ULX role-based", "safe": "Safest (highest prob)",
                      "value": "Best value (edge)", "boom": "Boom (longshots)"}.get,
     )
     max_per_game = c3.selectbox("Max bats / game", [1, 2], index=0)
@@ -1702,10 +1482,10 @@ def _hr_parlay_builder(df):
 
 def _mixed_ladder(df):
     st.caption(
-        "The **risk ladder** — *don't get stuck on HRs*. One leg per bet "
+        "The **ULX betting pyramid** — *don't get stuck on HRs*. One leg per bet "
         "type (💣 HR · 🟧 Double · 🟩 Total Bases · 🏃 Stolen Base · 🔷 Run), each from a "
         "different game: high-risk top, volume base. Non-HR cash rates are "
-        "**modeled estimates** from league hit-rate baselines scaled by each bat's "
+        "**modeled estimates** from the ULX hit-rate pyramid scaled by each bat's "
         "profile fit."
     )
     n = st.slider("Legs", 2, 5, 5, key="ladder_legs",
@@ -1735,14 +1515,14 @@ def _mixed_ladder(df):
     c1.metric("Ticket (est.)", format_american(s["combined_american"]))
     c2.metric("Est. win %", f"{s['combined_prob']}%")
     c3.metric("$10 pays (est.)", f"${s['payout_per_10']:,.0f}")
-    st.caption("💡 Golden rules: never bet the same thing in every game · stack "
+    st.caption("💡 ULX golden rules: never bet the same thing in every game · stack "
                "ways to cash · volume is king at the base of the ticket.")
 
 
 def _prop_boards(df):
     st.caption(
         "**The prop ladder** — pick a bet type and see which bats fit it best "
-        "(measured drivers + lineup-spot role). **Best Bet** runs each "
+        "(ULX cheat-sheet drivers + lineup-spot role). **ULX Best Bet** runs each "
         "player through the decision tree: elite HR profile → HR, else 2B → Run → "
         "SB → Hits/TB, else pass."
     )
@@ -1762,7 +1542,7 @@ def _prop_boards(df):
                  if src_col is not None else "🟡 est"),
         "Edge%": (b[f"edge_{bet}_pct"] if f"edge_{bet}_pct" in b.columns
                   else pd.Series(np.nan, index=b.index)),
-        "Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
+        "ULX Best Bet": b["best_bet"].map(lambda x: BET_LABEL.get(x, "❌ Pass")),
         "Why": b["best_bet_reason"],
     })
     if has_live:
@@ -1773,10 +1553,10 @@ def _prop_boards(df):
         height=min(560, 60 + 35 * min(len(show), 14)),
         column_config={
             "Fit": st.column_config.ProgressColumn(
-                "Fit", help="How well this bat fits the bet type (measured drivers + lineup spot).",
+                "Fit", help="How well this bat fits the bet type (ULX drivers + lineup spot).",
                 min_value=0, max_value=100, format="%.0f"),
             "Cash %": st.column_config.NumberColumn(
-                "Cash %", help="Model cash probability (league base rate scaled "
+                "Cash %", help="Model cash probability (ULX pyramid base rate scaled "
                 "by fit; HR uses the real model probability).", format="%.0f%%"),
             "Odds": st.column_config.NumberColumn(
                 "Odds", help="Real book line when 🟢 LIVE (best price across books, "
@@ -1993,9 +1773,9 @@ def render_hr_of_day(df):
                 reasons.append("hot over the last 7 days")
             if row.get("consistency_score", 0) >= 65:
                 reasons.append("high floor / steady hard contact")
-            if pd.notna(row.get("barrel_score")) and row["barrel_score"] >= 65:
-                reasons.insert(0, f"elite batted-ball quality "
-                               f"({_fmt(row.get('barrel_pct'))}% barrel)")
+            if pd.notna(row.get("ulx_checks")):
+                reasons.insert(0, f"ULX profile {row.get('ulx_grade','')} "
+                               f"({int(row['ulx_checks'])}/9 power checks)")
             st.markdown("**Why we're confident:** " + "; ".join(reasons[:4]) + ".")
         with c2:
             m1, m2 = st.columns(2)
@@ -2014,31 +1794,6 @@ def render_hr_of_day(df):
             )
     except Exception:
         pass
-
-
-def render_game_of_the_day(df):
-    """My single favorite game on the board — score, side, total, and why."""
-    from src.gamescore import attach_top_bat, game_of_the_day, predict_games
-    if df is None or df.empty or "game" not in df.columns:
-        return
-    games = attach_top_bat(predict_games(df), df)
-    row = game_of_the_day(games)
-    if row is None:
-        return
-    with st.container(border=True):
-        st.markdown("### ⭐ Game of the Day")
-        c1, c2 = st.columns([3, 2])
-        with c1:
-            _score_card(row, headline=True)
-            st.caption(f"💡 {row['rationale']}")
-        with c2:
-            st.metric("My play", row["gotd_bet"],
-                      f"{'side' if row['gotd_angle']=='side' else 'total'} edge")
-            if row.get("top_bat"):
-                st.caption(f"⚾ Best HR bat in it: **{row['top_bat']}** "
-                           f"({row.get('top_bat_team','')}) — "
-                           f"{row.get('top_bat_hr_pct','?')}%")
-    st.caption("Full board in **🎯 Picks → 🔮 Score Predictor**.")
 
 
 def render_top_picks(df):
@@ -2067,7 +1822,7 @@ def render_top_picks(df):
                    f"{val['edge_pct']:+.1f}%", "model edge vs the book")
 
     with c4:
-        res = generate_parlay(df, n_legs=3, strategy="model")
+        res = generate_parlay(df, n_legs=3, strategy="ulx")
         s = res["summary"]
         names = " · ".join(res["legs"]["player"].tolist()) if not res["legs"].empty else "—"
         _pick_card("🎰 Suggested 3-leg", s.get("combined_american_str", "—"),
@@ -2132,7 +1887,7 @@ def tab_lineups(df, end_iso, prefer_live):
     games = sorted(df["game"].unique())
     game = st.selectbox("Game", games, key="lu_game")
     g = df[df["game"] == game]
-    # "HR hunting mode" read for the game's environment.
+    # ULX "HR hunting mode" read for the game's environment.
     env_count = int(g["hr_env_count"].max()) if "hr_env_count" in g.columns else 0
     if "hr_hunting" in g.columns and g["hr_hunting"].any():
         st.success(f"🔥 **HR Hunting Mode** — strong HR environment ({env_count}/5 "
@@ -2176,8 +1931,8 @@ def main():
             "2. **🏠 Today** — the HR of the Day and headline picks.\n"
             "3. **🎯 Picks** — Longshots, Consistent, Sneaky, Value, or the full board.\n"
             "4. **🎰 Parlays** — HR parlays, the **🪜 Mixed Ladder** (HR + doubles + "
-            "total bases + steals + runs across the risk ladder), and per-bet **Prop "
-            "Boards** with each player's Best Bet.\n"
+            "total bases + steals + runs, per the ULX pyramid), and per-bet **Prop "
+            "Boards** with each player's ULX Best Bet.\n"
             "5. **🧾 Lineups** & **📚 History** — today's orders and who's been homering.\n\n"
             "📲 **Install it like an app:** open this page in your phone browser → "
             "**Share / ⋮ menu → Add to Home Screen**.\n\n"
@@ -2231,9 +1986,10 @@ def main():
     sp_counts = load_sp_spot_counts(end_iso, prefer_live, _pairs)
     scored = attach_sp_spot_signal(scored, sp_counts)
     # Live Trends Lab signals (streaks, tier rotation, spot×weekday heat) —
+    # these now carry more pick weight than the ULX checklist.
     scored = attach_trend_signals(scored, events, game_date.strftime("%A"))
     scored = attach_odds(scored, end_iso, use_live=live_odds)
-    scored = attach_props(scored)   # prop ladder: per-bet-type fit & est. odds
+    scored = attach_props(scored)   # ULX prop ladder: per-bet-type fit & est. odds
     # Real TB/Hits lines are opt-in inside the Parlays tab (extra API credits).
     history = (events, summary, centroid, calib, trend, league_spot, score_curve,
                report, h_source, h_notes, start_iso, end_iso, half_life)
@@ -2254,27 +2010,19 @@ def main():
     with t_today:
         render_hr_of_day(filtered)
         st.markdown("")
-        render_game_of_the_day(scored)
-        st.markdown("")
         render_top_picks(filtered)
         st.caption("Head to **🎯 Picks → 🏆 Top 3** for the daily shortlist (top 3 HR "
-                   "picks / value plays / longshots), **🔮 Score Predictor** for a "
-                   "projected final score in every game, **🎰 Parlays** to build "
+                   "picks / value plays / longshots), **🎰 Parlays** to build "
                    "tickets, **🧾 Lineups** for today's orders, **📚 History** for "
                    "previous HRs & trends.")
     with t_picks:
         view = st.radio(
-            "View", ["🏆 Top 3", "🔮 Score Predictor", "⚔️ Top 2 by Team",
-                     "🚀 Longshots", "🎯 Consistent", "🕵️ Sneaky",
-                     "💎 Value Finder", "📊 Full Board"],
+            "View", ["🏆 Top 3", "⚔️ Top 2 by Team", "🚀 Longshots", "🎯 Consistent",
+                     "🕵️ Sneaky", "💎 Value Finder", "📊 Full Board"],
             horizontal=True, label_visibility="collapsed", key="picks_view",
         )
         if view == "🏆 Top 3":
             tab_top3(filtered)
-        elif view == "🔮 Score Predictor":
-            # Deliberately the UNFILTERED slate — a score projection needs the
-            # whole batting order, not just the bats that survived the filters.
-            tab_game_scores(scored)
         elif view == "⚔️ Top 2 by Team":
             tab_by_matchup(filtered)
         elif view == "🚀 Longshots":

@@ -301,46 +301,6 @@ def fetch_game_hr_details(game_pk) -> tuple:
     return tuple(out)
 
 
-@lru_cache(maxsize=8)
-def fetch_final_scores(date_iso: str) -> tuple:
-    """Real final scores for every COMPLETED game on a date.
-
-    One StatsAPI schedule call for the whole slate — much lighter than pulling a
-    box score per game. Games still in progress, postponed or suspended are
-    skipped: a projection can only be graded against a finished game.
-
-    Each dict: home/away abbr, runs, innings played, and the game_pk.
-    """
-    data = _get_json(SCHEDULE_URL, {"sportId": 1, "date": date_iso,
-                                    "hydrate": "linescore,team"})
-    if not data or not data.get("dates"):
-        return ()
-    out = []
-    for d in data["dates"]:
-        for g in d.get("games", []):
-            state = ((g.get("status") or {}).get("abstractGameState") or "")
-            detail = ((g.get("status") or {}).get("detailedState") or "")
-            if state != "Final" or "Suspended" in detail:
-                continue
-            home = _TEAM_ID_TO_ABBR.get(g["teams"]["home"]["team"].get("id"))
-            away = _TEAM_ID_TO_ABBR.get(g["teams"]["away"]["team"].get("id"))
-            if not home or not away:
-                continue
-            hr_ = g["teams"]["home"].get("score")
-            ar = g["teams"]["away"].get("score")
-            if hr_ is None or ar is None:
-                continue
-            ls = g.get("linescore") or {}
-            out.append({
-                "game_pk": g.get("gamePk"),
-                "home_team": home, "away_team": away,
-                "home_runs": int(hr_), "away_runs": int(ar),
-                "innings": int(ls.get("currentInning") or 9),
-                "game": f"{away} @ {home}",
-            })
-    return tuple(out)
-
-
 @lru_cache(maxsize=2048)
 def fetch_game_box_hrs(game_pk) -> tuple:
     """Return the real HR hitters from a completed game's box score.
@@ -458,7 +418,7 @@ def season_year_for(game_date: dt.date) -> int:
 
 
 def _hitter_metrics(name: str, bats: str, slate_seed: str, mlbam_id, year: int,
-                    end_date_iso: str, as_of: str | None = None) -> tuple[dict, bool]:
+                    end_date_iso: str) -> tuple[dict, bool]:
     """Attach hitter Statcast metrics. Returns (profile, used_real_data).
 
     Strategy: start from the deterministic modeled profile (guarantees every
@@ -471,7 +431,7 @@ def _hitter_metrics(name: str, bats: str, slate_seed: str, mlbam_id, year: int,
     profile = dict(demo._hitter_profile(name, bats, tier, slate_seed))
     used_real = False
 
-    real = _statcast_lookup(name, mlbam_id, year, as_of=as_of)
+    real = _statcast_lookup(name, mlbam_id, year)
     if real:
         profile.update(real)
         used_real = True
@@ -511,18 +471,13 @@ def _known_tier(name: str) -> int:
     return _name_to_tier().get(name, 3)
 
 
-def _statcast_lookup(name: str, mlbam_id=None, year: int | None = None,
-                     as_of: str | None = None):
-    """Return a real season Statcast/FanGraphs profile dict, or None.
-
-    `as_of` requests the line as it stood the day before that date — used when
-    GRADING a past day, so a June row doesn't carry an end-of-season stat line.
-    """
+def _statcast_lookup(name: str, mlbam_id=None, year: int | None = None):
+    """Return a real season Statcast/FanGraphs profile dict, or None."""
     try:
         from . import statcast
         if year is None:
             year = season_year_for(dt.date.today())
-        return statcast.lookup_season(year, name, mlbam_id, as_of=as_of)
+        return statcast.lookup_season(year, name, mlbam_id)
     except Exception:
         return None
 
@@ -561,9 +516,8 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
     """Build pitcher metrics. Returns (profile, used_real_data).
 
     Starts from the modeled profile, then overlays REAL FanGraphs peripherals
-    (HR/9, GB%, FB%, barrels allowed, K%, BB%, ERA, FIP, IP-per-start) by name
-    and the REAL Statcast pitch mix by id; the fly-ball/ground-ball lean is
-    recomputed from real GB% when available.
+    (HR/9, GB%, FB%, barrels allowed) by name and the REAL Statcast pitch mix by
+    id; the fly-ball/ground-ball lean is recomputed from real GB% when available.
     """
     prof = dict(demo._pitcher_profile(team_abbr, slate_seed))
     if name:
@@ -607,18 +561,10 @@ def _pitcher_metrics(name: str, throws: str, team_abbr: str, slate_seed: str,
     return prof, used_real
 
 
-def build_live_slate(game_date: dt.date,
-                     as_of: bool = False) -> tuple[pd.DataFrame | None, list[str]]:
-    """Build a per-hitter slate from real MLB schedule data. Returns (df, notes).
-
-    `as_of=True` rebuilds season stats as they stood the day BEFORE game_date,
-    which is what grading a completed day requires. Live scoring leaves it off:
-    today's "as of now" already IS as of today, and the point-in-time rebuild
-    is a much heavier pull.
-    """
+def build_live_slate(game_date: dt.date) -> tuple[pd.DataFrame | None, list[str]]:
+    """Build a per-hitter slate from real MLB schedule data. Returns (df, notes)."""
     notes: list[str] = []
     date_iso = game_date.isoformat()
-    as_of_iso = date_iso if as_of else None
     games = fetch_schedule(date_iso)
     if not games:
         return None, ["No live schedule available for this date."]
@@ -630,9 +576,9 @@ def build_live_slate(game_date: dt.date,
     real_pitchers = 0
     try:
         from . import statcast as _sc
-        bullpen = _sc.get_bullpen_table(year)
+        bullpen_hr9 = _sc.get_bullpen_hr9_table(year)
     except Exception:
-        bullpen = {}
+        bullpen_hr9 = {}
     try:
         from .lineup import typical_spots
         from .statcast import normalize_name as _norm
@@ -682,7 +628,7 @@ def build_live_slate(game_date: dt.date,
                     # ACTUALLY hit lately (graded record), else roster order.
                     spot = typ_spots.get(_norm(name)) or demo.demo_spot_for_index(ridx)
                 metrics, used_real = _hitter_metrics(
-                    name, bats, slate_seed, pid, year, date_iso, as_of=as_of_iso
+                    name, bats, slate_seed, pid, year, date_iso
                 )
                 total_hitters += 1
                 real_hitters += int(used_real)
@@ -699,7 +645,7 @@ def build_live_slate(game_date: dt.date,
                     "game": f"{away} @ {home}",
                     "data_quality": "real" if used_real else "modeled",
                     # ~40% of PAs come vs the pen — the OPPONENT's bullpen HR/9.
-                    **(bullpen.get(opp) or {}),      # bullpen HR/9, ERA, K%
+                    "bullpen_hr9": bullpen_hr9.get(opp),
                     "is_night": is_night,   # start-time park effect
                     "series_game": g.get("series_game"),   # familiarity within series
                     # Hitter fatigue: consecutive games, day-after-night.
@@ -749,21 +695,16 @@ def build_live_slate(game_date: dt.date,
     return pd.DataFrame(rows), notes
 
 
-def get_slate(game_date: dt.date, prefer_live: bool = True,
-              as_of: bool = False) -> tuple[pd.DataFrame, str, list[str]]:
+def get_slate(game_date: dt.date, prefer_live: bool = True) -> tuple[pd.DataFrame, str, list[str]]:
     """Return (slate_df, source_label, notes).
 
     source_label is one of: 'LIVE (real Statcast)', 'LIVE (modeled metrics)',
     'DEMO (synthetic)'.
-
-    `as_of=True` builds season stats as of the day before `game_date` — set it
-    when GRADING a completed day so the record doesn't carry stats from the
-    future. Live picks leave it off.
     """
     notes: list[str] = []
     if prefer_live:
         try:
-            df, live_notes = build_live_slate(game_date, as_of=as_of)
+            df, live_notes = build_live_slate(game_date)
             notes.extend(live_notes)
             if df is not None and not df.empty:
                 has_real = "data_quality" in df.columns and (df["data_quality"] == "real").any()

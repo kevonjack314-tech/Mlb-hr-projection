@@ -166,7 +166,7 @@ def _eval_feature_index() -> dict:
 # re-adding those as inputs would create duplicate columns after scoring.
 _EVAL_FEAT_SKIP = {"date", "player", "team", "lineup_spot", "hit_hr",
                    "parlay_role", "top_pick", "hr_score", "hr_prob_game",
-                   "recent_form_score", "matchup_score",
+                   "ulx_checks", "recent_form_score", "matchup_score",
                    "env_score", "pitch_matchup_score", "platoon_adv",
                    "expected_pa", "woba_vs_hand", "park_factor", "wind_mult",
                    "park_fit_mult", "park_porch_ft", "daynight_mult"}
