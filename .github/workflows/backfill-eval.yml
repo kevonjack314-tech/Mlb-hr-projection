@@ -15,6 +15,11 @@ on:
         description: "How many days back to grade"
         required: false
         default: "30"
+      regrade:
+        description: "Re-grade dates already logged (needed after a feature fix)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,7 +31,7 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,7 +50,18 @@ jobs:
           DATE="${{ github.event.inputs.end_date || '' }}"
           DAYS="${{ github.event.inputs.days || '30' }}"
           if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
-          python scripts/backfill_eval.py "$DATE" "$DAYS"
+          REGRADE=""
+          if [ "${{ github.event.inputs.regrade }}" = "true" ]; then REGRADE="--regrade"; fi
+          python scripts/backfill_eval.py "$DATE" "$DAYS" $REGRADE --minutes=110
+
+      - name: Backfill the score-predictor record
+        run: |
+          DATE="${{ github.event.inputs.end_date || '' }}"
+          DAYS="${{ github.event.inputs.days || '30' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u -d 'yesterday' +%F)"; fi
+          REGRADE=""
+          if [ "${{ github.event.inputs.regrade }}" = "true" ]; then REGRADE="--regrade"; fi
+          python scripts/grade_games.py "$DATE" "$DAYS" $REGRADE --minutes=40 || echo "game grading skipped"
 
       - name: Refresh the lineup HR log from the graded record
         run: |
@@ -57,7 +73,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
-          git add data/eval_log.csv data/model_tuning.json data/lineup_hr_log.csv 2>/dev/null || true
+          git add data/eval_log.csv data/model_tuning.json data/lineup_hr_log.csv data/game_eval_log.csv 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else

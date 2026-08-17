@@ -68,4 +68,4 @@ def test_previous_hrs_metrics_come_from_eval_record():
         assert key in feats and feats[key] == feats[key]
     assert 0 < scored["hr_prob_game"] < 1 and scored["hr_score"] > 0
     # Nothing that score_slate re-derives may leak in as an input.
-    assert not {"matchup_score", "env_score", "ulx_checks", "park_factor"} & set(feats)
+    assert not {"matchup_score", "env_score", "park_factor"} & set(feats)

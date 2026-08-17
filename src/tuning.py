@@ -88,6 +88,10 @@ FEATURE_COLS = [
     "pitcher_hr9", "park_factor", "wind_mult", "temp_f", "expected_pa",
     # real platoon splits + bullpen exposure (may be sparse early on)
     "woba_vs_l", "woba_vs_r", "woba_vs_hand", "bullpen_hr9",
+    # opposing staff quality beyond home runs: strikeouts are the primary
+    # run-suppression lever and drive how many balls are even put in play
+    "pitcher_k_pct", "pitcher_bb_pct", "pitcher_fip", "sp_ip_per_start",
+    "bullpen_era", "bullpen_k_pct",
     # fence geometry x pull side
     "park_fit_mult", "park_porch_ft",
     # opposing starter's meatball (middle-middle) supply
@@ -163,6 +167,11 @@ def fit_calibration(log: pd.DataFrame) -> dict:
     out = {"n": 0, "bins": [], "brier": None, "updated": None}
     if log is None or log.empty:
         return out
+    log, drop_note = clean_log(log)
+    if drop_note:
+        out["excluded"] = drop_note
+    if log.empty:
+        return out
     df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
     out["n"] = int(len(df))
     out["brier"] = brier_score(df)
@@ -194,6 +203,7 @@ def fit_role_factors(log: pd.DataFrame) -> dict:
     what has really been cashing.
     """
     out = {"role_factors": {}, "role_n": {}}
+    log, _ = clean_log(log)
     if log is None or log.empty or "parlay_role" not in log.columns:
         return out
     legs = log[log["parlay_role"].astype(str).isin(["Anchor", "Value", "Longshot"])]
@@ -297,6 +307,115 @@ FEATURE_MODEL_MIN_ROWS = 2000    # don't even fit below this
 FEATURE_MODEL_TRUST_ROWS = 10000  # blend weight reaches its 0.5 cap here
 _FM_MIN_COVERAGE = 0.7           # a feature must be present on ≥70% of rows
 
+# Rolling-window features that must be computed strictly BEFORE the game date.
+# If a graded row's own home run leaks into them, the learned model rockets
+# their weight and validates beautifully on a holdout that is leaked too.
+LEAKY_CANDIDATES = ("hr_rate_7", "hr_rate_15", "hr_rate_30", "recent_form_score",
+                    "barrel_pct_14", "xwoba_14", "bvp_hr")
+
+
+def leaked_dates(log: pd.DataFrame, min_hr_games: int = 5,
+                 min_zero_share: float = 0.20) -> set:
+    """Which graded DATES carry the leaked feature windows.
+
+    Per-date rather than all-or-nothing, because a record gets fixed one day at
+    a time: once the windows were corrected, newly graded days are clean while
+    every older day still carries the bug. Judging the whole log would either
+    throw away good days or trust bad ones.
+
+    The test is the same tell as `leakage_report`, applied per date: among that
+    day's home runs, what share of hitters show a 0 in their prior-7-day
+    window? Honest days land near 40-60% (plenty of home runs are a hitter's
+    first in a week); leaked days sit near zero. Dates with too few home runs
+    to judge are kept — they are too small to move a fit either way.
+    """
+    if log is None or log.empty or "date" not in log.columns:
+        return set()
+    if "hr_rate_7" not in log.columns or "hit_hr" not in log.columns:
+        return set()
+    v = pd.to_numeric(log["hr_rate_7"], errors="coerce")
+    y = pd.to_numeric(log["hit_hr"], errors="coerce")
+    d = pd.DataFrame({"date": log["date"], "v": v, "y": y}).dropna()
+    hits, misses = d[d["y"] == 1], d[d["y"] == 0]
+    if hits.empty or misses.empty:
+        return set()
+    grp = hits.groupby("date")["v"]
+    counts, zero_share = grp.size(), grp.apply(lambda s: float((s == 0).mean()))
+    # The zero-rate test only means something if zeros occur AT ALL on that
+    # date. A feed that never emits an exact 0 (a filled or smoothed window)
+    # would otherwise look leaked everywhere and silently delete the entire
+    # training set — a far worse failure than the bug being detected. So a date
+    # is only judged when its NON-HR games show plenty of zeros to compare to.
+    miss_zero = misses.groupby("date")["v"].apply(lambda s: float((s == 0).mean()))
+    judgeable = miss_zero.reindex(zero_share.index).fillna(0.0) >= min_zero_share
+    bad = zero_share[(counts >= min_hr_games) & judgeable
+                     & (zero_share < min_zero_share)]
+    return set(bad.index)
+
+
+def clean_log(log: pd.DataFrame) -> tuple:
+    """Drop leaked dates before any fit. Returns (clean_log, note_or_None).
+
+    Every learned artefact — the calibration curve, the role factors and the
+    feature model — trains on this. The calibration curve in particular touches
+    every live probability, so leaving it fit on contaminated rows would keep
+    the bug in production long after the windows themselves were fixed.
+    """
+    if log is None or log.empty:
+        return log, None
+    bad = leaked_dates(log)
+    if not bad:
+        return log, None
+    kept = log[~log["date"].isin(bad)]
+    note = (f"excluded {len(bad)} leaked date(s) / {len(log) - len(kept)} rows "
+            f"— regrade them to put the data back in play")
+    return kept, note
+
+# A note on dates whose Statcast pull failed outright: every hr_rate_7 is NaN,
+# so `leaked_dates` can't judge them and keeps them. That is the right call —
+# a row with no recent-form feature at all cannot have leaked one, and its
+# prediction/outcome pair is still perfectly good for calibration. Those rows
+# are separately filtered out of the FEATURE model by the coverage threshold.
+
+
+def leakage_report(log: pd.DataFrame) -> dict:
+    """Detect target leakage in the graded record's rolling-window features.
+
+    The tell is simple. A 7-day HR-rate window that truly stops the day before
+    the game must be exactly 0 for plenty of players who then homer — plenty of
+    home runs are the hitter's first in a week. If almost no HR game shows a
+    zero window while most non-HR games do, the window is eating its own
+    outcome.
+
+    Returns {feature: {...}, "leaked": bool}. Pure + offline: it reads only the
+    log, so it runs in tests and in CI.
+    """
+    out: dict = {"leaked": False, "features": {}}
+    if log is None or log.empty or "hit_hr" not in log.columns:
+        return out
+    y = pd.to_numeric(log["hit_hr"], errors="coerce")
+    for f in LEAKY_CANDIDATES:
+        if f not in log.columns:
+            continue
+        v = pd.to_numeric(log[f], errors="coerce")
+        m = v.notna() & y.notna()
+        if m.sum() < 500:
+            continue
+        hit, miss = v[m & (y == 1)], v[m & (y == 0)]
+        if len(hit) < 100 or len(miss) < 100:
+            continue
+        z_hit, z_miss = float((hit == 0).mean()), float((miss == 0).mean())
+        # Leaked when non-HR days are routinely zero but HR days almost never
+        # are — a gap no honest prior-window feature produces.
+        leaked = bool(z_miss >= 0.20 and z_hit < 0.25 * z_miss)
+        out["features"][f] = {"zero_rate_hr": round(z_hit, 4),
+                              "zero_rate_no_hr": round(z_miss, 4),
+                              "mean_hr": round(float(hit.mean()), 5),
+                              "mean_no_hr": round(float(miss.mean()), 5),
+                              "leaked": leaked}
+        out["leaked"] = out["leaked"] or leaked
+    return out
+
 
 def _feature_matrix(df: pd.DataFrame, feats: list[str], medians: dict) -> np.ndarray:
     cols = []
@@ -317,6 +436,21 @@ def fit_feature_model(log: pd.DataFrame) -> dict:
     out = {"feature_model": {"n": 0, "active": False, "note": "warming up"}}
     if log is None or log.empty or "hit_hr" not in log.columns:
         return out
+
+    # Refuse to learn from a leaked record. A model fit on rows whose recent-form
+    # window contains the game's own home run will always "beat" the hand model
+    # on a holdout that leaks the same way — it validates itself into production.
+    log, drop_note = clean_log(log)
+    leak = leakage_report(log)
+    if leak["leaked"] or log.empty:
+        bad = ", ".join(k for k, v in leak["features"].items() if v["leaked"])
+        out["feature_model"] = {
+            "n": 0, "active": False, "leakage": leak["features"],
+            "note": f"DISABLED — target leakage in the graded record "
+                    f"({bad or 'no clean dates left'}); regrade those dates "
+                    f"before trusting learned weights"}
+        return out
+
     df = log.dropna(subset=["hr_prob_game", "hit_hr"]).copy()
     feats = [f for f in FEATURE_COLS if f in df.columns
              and pd.to_numeric(df[f], errors="coerce").notna().mean() >= _FM_MIN_COVERAGE]
@@ -428,7 +562,10 @@ FEATURE_LABELS = {
     "pitcher_hr9": "Starter HR/9", "park_factor": "Park factor", "wind_mult": "Wind",
     "temp_f": "Temperature", "expected_pa": "Expected PAs",
     "woba_vs_l": "wOBA vs LHP", "woba_vs_r": "wOBA vs RHP", "woba_vs_hand": "wOBA vs today's hand",
-    "bullpen_hr9": "Opposing bullpen HR/9", "park_fit_mult": "Park fence fit (pull side)",
+    "bullpen_hr9": "Opposing bullpen HR/9",
+    "pitcher_k_pct": "Starter K%", "pitcher_bb_pct": "Starter BB%",
+    "pitcher_fip": "Starter FIP", "sp_ip_per_start": "Starter IP/start",
+    "bullpen_era": "Opposing bullpen ERA", "bullpen_k_pct": "Opposing bullpen K%", "park_fit_mult": "Park fence fit (pull side)",
     "park_porch_ft": "Pull-side fence distance", "sp_meatball_pct": "Starter meatball rate",
     "sp_velo_delta": "Starter velo trend", "sp_velo_last": "Starter last-start velo",
     "sp_tto_penalty": "Starter 3rd-time-through penalty",
@@ -563,7 +700,9 @@ def evaluate_day(date_iso: str, prefer_live: bool = True):
     import datetime as dt
 
     game_date = dt.date.fromisoformat(date_iso)
-    df, source, _notes = get_slate(game_date, prefer_live=prefer_live)
+    # as_of: rebuild season stats as they stood the day BEFORE the game, so a
+    # graded June row can't carry an end-of-season stat line.
+    df, source, _notes = get_slate(game_date, prefer_live=prefer_live, as_of=True)
     if df is None or df.empty:
         return None, "no slate"
     if not str(source).startswith("LIVE"):
