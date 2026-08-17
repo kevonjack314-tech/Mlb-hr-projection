@@ -11,35 +11,60 @@ Known trade-off: season-stat lookups are "as of today", so backfilled rows
 carry mild lookahead bias. For calibration purposes that's an accepted trade.
 
 Usage:
-    python scripts/backfill_eval.py [END_DATE] [DAYS]
+    python scripts/backfill_eval.py [END_DATE] [DAYS] [--regrade] [--minutes=N]
 
 Defaults: END_DATE = yesterday (UTC), DAYS = 30. Dates already in the eval
-log are skipped, so re-running is cheap and idempotent.
+log are skipped, so re-running is cheap and idempotent. Pass --regrade to
+re-grade dates already present and overwrite their rows — needed after a
+feature-window fix, since old rows carry the old (leaky) feature values.
+
+--minutes=N caps the wall-clock spent grading (default 90). A run that blows
+the job timeout is CANCELLED, which skips the commit step and throws away
+every day it graded — so the budget stops early on purpose, leaving time to
+commit the progress. Re-run to continue where it left off.
 """
 import datetime as dt
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.tuning import (  # noqa: E402
     append_eval_rows, brier_score, evaluate_day, fit_calibration,
-    fit_feature_model, fit_role_factors, load_eval_log, save_tuning,
+    fit_feature_model, fit_role_factors, leakage_report, load_eval_log,
+    save_tuning,
 )
 
 
 def main() -> None:
-    end = (dt.date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    regrade = "--regrade" in sys.argv
+    end = (dt.date.fromisoformat(argv[0]) if argv
            else dt.date.today() - dt.timedelta(days=1))
-    days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+    days = int(argv[1]) if len(argv) > 1 else 30
+    budget_min = next((float(a.split("=", 1)[1]) for a in sys.argv
+                       if a.startswith("--minutes=")), 90.0)
+    deadline = time.time() + budget_min * 60.0
 
-    have = set(load_eval_log().get("date", []))
+    # append_eval_rows keeps the LAST row for a (date, player), so re-grading
+    # simply overwrites the stale rows in place.
+    have = set() if regrade else set(load_eval_log().get("date", []))
+    if regrade:
+        print("REGRADE: re-grading dates already in the log (overwrites rows)")
+    print(f"time budget: {budget_min:.0f} min")
     graded = skipped = 0
+    ran_out = False
     for k in range(days, -1, -1):          # oldest → newest
         d = (end - dt.timedelta(days=k)).isoformat()
         if d in have:
             skipped += 1
             continue
+        if time.time() > deadline:
+            ran_out = True
+            print(f"[{d}] STOPPING — time budget spent; re-run to continue "
+                  f"from here (graded {graded} so far, committing them now)")
+            break
         try:
             rows, note = evaluate_day(d, prefer_live=True)
         except Exception as e:              # one bad date shouldn't kill the run
@@ -59,12 +84,20 @@ def main() -> None:
     save_tuning(tuning, when=dt.date.today().isoformat())
 
     fm = tuning.get("feature_model") or {}
-    print(f"\nbackfill done: {graded} dates graded, {skipped} already logged")
+    print(f"\nbackfill {'PARTIAL (budget spent)' if ran_out else 'done'}: "
+          f"{graded} dates graded, {skipped} already logged")
     print(f"track record: {tuning.get('n', 0)} hitter-days over "
           f"{log['date'].nunique() if not log.empty else 0} days | Brier {brier_score(log)}")
     print(f"calibration: {'ACTIVE' if tuning.get('bins') else 'warming up'}"
           f" | role factors: {tuning.get('role_factors') or 'warming up'}")
     print(f"learned feature model: {fm.get('note', 'n/a')}")
+
+    leak = leakage_report(log)
+    print("leakage check: " + ("CLEAN" if not leak["leaked"] else "LEAKED — " + ", ".join(
+        k for k, v in leak["features"].items() if v["leaked"])))
+    for k, v in leak["features"].items():
+        print(f"  {k:20s} zero-rate  HR {v['zero_rate_hr']:.3f} | no-HR "
+              f"{v['zero_rate_no_hr']:.3f}{'   <-- LEAK' if v['leaked'] else ''}")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ import pandas as pd
 
 from .parks import (
     daynight_hr_multiplier,
+    hr_environment,
     get_park,
     humidity_hr_multiplier,
     park_hr_multiplier,
@@ -31,7 +32,8 @@ from .parks import (
     wind_hr_multiplier,
 )
 from .tuning import calibrate_game_prob
-from .ulx import hr_environment, power_checks
+from .ulx import power_checks
+
 
 # League average HR per plate appearance (modern run environment).
 LEAGUE_HR_PER_PA = 0.034
@@ -90,8 +92,20 @@ POWER_QUALITY_WEIGHTS = {
     "avg_ev": 0.08,
 }
 
-# Recent-form blend (sum to 1.0): the 7-day window is the loudest signal.
-RECENT_FORM_WEIGHTS = {"hr_rate_7": 0.50, "hr_rate_15": 0.30, "hr_rate_30": 0.20}
+# Recent-form blend (sum to 1.0). The 7-day window is the LOUDEST signal but
+# not the most useful one: measured leak-free against the graded record, a full
+# prior week with zero HR only drops today's HR rate to 0.90x league, and one
+# HR is 1.01x — essentially noise. It takes 3+ in a week to reach ~1.7x, on a
+# thin sample. So the weight sits mostly on the stabler 15/30-day windows.
+RECENT_FORM_WEIGHTS = {"hr_rate_7": 0.30, "hr_rate_15": 0.35, "hr_rate_30": 0.35}
+
+# How much of the recent-form score to keep, by talent tier. Splitting the
+# graded record by season HR shows hot form is nearly worthless on stars
+# (0.93x / 1.05x / 1.04x by prior-week HR — flat) and matters most on the
+# lower tiers, where "hot" is partly a talent signal the season line hasn't
+# caught up to yet. Scores shrink toward neutral (50) by these factors.
+FORM_SHRINK = {"star": 0.35, "mid": 0.70, "under": 1.00}
+FORM_SHRINK_DEFAULT = 0.70
 
 
 def scale(value: float, lo: float, hi: float) -> float:
@@ -186,12 +200,17 @@ def matchup_multiplier(row: pd.Series) -> tuple[float, float]:
         # A +0.030 wOBA 3rd-time penalty on a leadoff bat ~ +6% HR mult.
         sp_mult *= float(np.clip(1.0 + float(tto) * reach * 2.0, 0.94, 1.10))
 
-    # Bullpen exposure: ~35% of expected PAs come after the starter departs.
-    # Gentler slope than the starter (relief HR/9 is noisier).
+    # Bullpen exposure, weighted by how much of THIS hitter's night is actually
+    # spent facing the starter. The old fixed 65/35 blend priced an opener the
+    # same as a 7-inning arm; the real split comes from the starter's IP/GS and
+    # the hitter's spot in the order.
+    from .lineup import pa_split
+    split = pa_split(row.get("lineup_spot"), row.get("sp_ip_per_start"))
+    sp_share = float(split["sp_share"])
     pen_hr9 = row.get("bullpen_hr9")
     if pen_hr9 is not None and pen_hr9 == pen_hr9:
         pen_mult = float(np.clip(0.92 + (float(pen_hr9) - 0.9) * 0.20, 0.86, 1.14))
-        blended = 0.65 * sp_mult + 0.35 * pen_mult
+        blended = sp_share * sp_mult + (1.0 - sp_share) * pen_mult
     else:
         blended = sp_mult
 
@@ -297,6 +316,21 @@ def _recent_form_rate(row: pd.Series) -> float:
     return sum(row.get(k, 0.0) * w for k, w in RECENT_FORM_WEIGHTS.items())
 
 
+def form_shrink(season_hr) -> float:
+    """How far to trust a hitter's hot/cold streak, by tier (see FORM_SHRINK)."""
+    try:
+        hr = float(season_hr)
+    except (TypeError, ValueError):
+        return FORM_SHRINK_DEFAULT
+    if hr != hr:
+        return FORM_SHRINK_DEFAULT
+    if hr >= 18:
+        return FORM_SHRINK["star"]
+    if hr >= 8:
+        return FORM_SHRINK["mid"]
+    return FORM_SHRINK["under"]
+
+
 def expected_hr(row: pd.Series) -> tuple[float, float, float]:
     """Season expected HR from batted-ball quality. Returns (xhr/PA, xHR, HR-xHR).
 
@@ -382,6 +416,10 @@ def score_row(row: pd.Series) -> dict:
     if trend_pts:
         recent_form_score = float(np.clip(
             recent_form_score + float(np.clip(trend_pts, -12.0, 12.0)), 0, 100))
+    # Shrink the streak toward neutral by tier — a star's hot week says almost
+    # nothing about tonight, an under-the-radar bat's says more.
+    _shrink = form_shrink(row.get("season_hr"))
+    recent_form_score = float(np.clip(50.0 + (recent_form_score - 50.0) * _shrink, 0, 100))
     k_score = scale(row.get("k_pct"), *REF["k_pct"])  # high = strikeout-prone
     # Swing-and-miss (whiff) rate: high = more boom-or-bust, lower contact floor.
     # Fall back to the K% signal when whiff isn't available.

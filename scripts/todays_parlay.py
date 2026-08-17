@@ -42,7 +42,7 @@ def _leg_line(i, leg):
           f"vs {leg.get('pitcher_throws','R')}HP {leg.get('pitcher_name','—')}{bvp_txt}")
     print(f"     HR Score {leg.get('hr_score',0):.0f} | Barrel% "
           f"{leg.get('barrel_pct','—')} | HR/FB {leg.get('hr_fb','—')} | "
-          f"MaxEV {leg.get('max_ev','—')} | ULX {leg.get('ulx_grade','—')}")
+          f"MaxEV {leg.get('max_ev','—')}")
     if leg.get("rationale"):
         print(f"     WHY: {leg['rationale']}")
 
@@ -103,8 +103,10 @@ def main() -> None:
               f"confidence {hotd['confidence']:.0f}/100 ***")
         print(f"    {hotd.get('rationale','')}")
 
-    _show(f"{n_legs}-LEG ULX (Anchor/Value/Longshot)",
+    _show(f"{n_legs}-LEG ULX ROLE-BASED (Anchor + Value + Longshot)",
           generate_parlay(scored, n_legs=n_legs, strategy="ulx"))
+    _show(f"{n_legs}-LEG MODEL-DRIVEN (record-informed composition)",
+          generate_parlay(scored, n_legs=n_legs, strategy="model"))
     _show(f"{n_legs}-LEG BEST-VALUE (record says Value legs over-deliver)",
           generate_parlay(scored, n_legs=n_legs, strategy="value"))
     _show(f"{n_legs}-LEG SAFEST (highest HR probability)",

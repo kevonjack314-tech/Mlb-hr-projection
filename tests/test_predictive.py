@@ -59,13 +59,12 @@ def test_attach_trend_signals():
 
 def test_trend_signals_move_role_fit():
     base = pd.Series({"hr_score": 60, "sneaky_score": 55, "edge_pct": 0.0,
-                      "lineup_spot": 4, "ulx_checks": 5})
+                      "lineup_spot": 4})
     hot = pd.Series({**base, "hot_streak": 1, "tier_lean": 1, "dow_spot_heat": 2.0})
     assert role_fit(hot, "Anchor") > role_fit(base, "Anchor")
-    # Reduced checklist weight: 9 checks vs 0 now moves Value fit by <= ~7.5.
-    lo = pd.Series({**base, "ulx_checks": 0})
-    hi = pd.Series({**base, "ulx_checks": 9})
-    assert role_fit(hi, "Value") - role_fit(lo, "Value") <= 7.5
+    # Trend signals are what move role fit now — no checklist term at all.
+    flat = pd.Series({**base, "hot_streak": 0, "tier_lean": 0, "dow_spot_heat": 0.0})
+    assert role_fit(hot, "Value") > role_fit(flat, "Value")
 
 
 def test_empty_events_are_safe():

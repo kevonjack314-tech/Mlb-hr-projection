@@ -61,6 +61,35 @@ def expected_pa(spot) -> float:
         return DEFAULT_PA
 
 
+def pa_split(spot, sp_ip_per_start=None) -> dict:
+    """Split a hitter's expected trips between the STARTER and the bullpen.
+
+    The model priced every hitter's matchup as if the starter/bullpen mix were
+    the same in every game. It isn't, and the difference is large: facing an
+    arm who works into the 7th you get ~2.5 cracks at him and ~1.5 at the pen,
+    while against an opener most of your night is relievers — a different
+    matchup wearing the same starter's name.
+
+    A starter faces the order once every ~9 batters, so IP/GS maps to trips:
+    ~3 outs per inning, ~4.3 batters per inning league-wide.
+
+    Returns {pa_total, pa_vs_sp, pa_vs_pen, sp_share}.
+    """
+    total = expected_pa(spot)
+    try:
+        ip = float(sp_ip_per_start)
+        if ip != ip:
+            raise ValueError
+    except (TypeError, ValueError):
+        return {"pa_total": total, "pa_vs_sp": total * 0.62,
+                "pa_vs_pen": total * 0.38, "sp_share": 0.62}
+    # Batters the starter faces / batters the whole game faces, capped so a
+    # complete game still leaves a sliver and an opener still leaves most.
+    share = min(max(ip / 9.0, 0.10), 0.92)
+    return {"pa_total": total, "pa_vs_sp": total * share,
+            "pa_vs_pen": total * (1.0 - share), "sp_share": share}
+
+
 def spot_role_fit(spot, role: str) -> float:
     """Small additive bonus (0-6) when a bat's spot suits the parlay role."""
     try:

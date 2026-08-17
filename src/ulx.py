@@ -74,24 +74,10 @@ def power_checks(row) -> dict:
 
 
 # Per-game HR-environment signals (the "HR hunting mode" board read).
-def hr_environment(row) -> dict:
-    """Score the home-run environment of a hitter's game from park, weather, and
-    the opposing starter. Returns a 0-100 score, the count of green flags, and a
-    'hunting mode' flag when several align."""
-    flags = []
-    wind = _val(row, "wind_mult")
-    flags.append(("Wind blowing out", wind is not None and wind >= 1.05))
-    temp = _val(row, "temp_f")
-    flags.append(("Warm temps (≥80°)", temp is not None and temp >= 80.0))
-    park = _val(row, "park_factor")
-    flags.append(("Hitter-friendly park", park is not None and park >= 105.0))
-    hr9 = _val(row, "pitcher_hr9")
-    flags.append(("Homer-prone starter (HR/9 ≥ 1.3)", hr9 is not None and hr9 >= 1.3))
-    flags.append(("Fly-ball starter", str(row.get("pitcher_lean", "")).upper() == "FB"))
-    n = sum(1 for _, ok in flags if ok)
-    return {
-        "hr_env_flags": flags,
-        "hr_env_count": n,
-        "hr_env_score": round(100.0 * n / len(flags), 1),
-        "hr_hunting": n >= 3,
-    }
+#
+# `hr_environment` lives in parks.py — it is pure park/weather/starter logic and
+# the rest of the model reaches for it there. It is re-exported here so the ULX
+# import path keeps working and there is only ever ONE implementation to change.
+from .parks import hr_environment  # noqa: E402,F401  (re-export)
+
+__all__ = ["POWER_CHECKS", "N_POWER_CHECKS", "power_checks", "hr_environment"]

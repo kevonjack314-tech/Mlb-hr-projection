@@ -1,28 +1,26 @@
-"""HR parlay generator — the ULX role-based formula.
+"""HR parlay generator — driven by the model and the graded record.
 
-Build parlays with ROLES, not names (per the ULX playbook):
+Legs are chosen on measured signal, not a checklist: the calibrated model HR
+probability, the model-vs-price edge, and the per-role reliability factors
+LEARNED from real graded outcomes (src/tuning.py).
 
-  • ANCHOR        — highest-confidence HR bat (best HR Score among realistic-odds
-                    plays). Usually ~ +250 to +600.
-  • VALUE BAT     — good profile / underpriced (high Sneaky + edge, mid odds).
-                    Usually ~ +450 to +950.
-  • DEEP LONGSHOT — overlooked high-ceiling bat (best Longshot score, long odds).
-                    Usually ~ +850 to +2000.
+Roles are just the tier bands the record is kept in (they map to the season-HR
+tiers in trends.py) — ⚓ Anchor = star bats, 💰 Value = mid-tier, 🚀 Longshot =
+under-the-radar. They exist so results can be tracked per band, not as a
+prescription for how a ticket must be built.
 
-Composition by number of legs (1-5):
-  1: Anchor
-  2: Anchor + Value
-  3: Anchor + Value + Longshot          (the canonical ULX ticket)
-  4: Anchor + Value + Value + Longshot
-  5: Anchor + Value + Value + Longshot + Longshot
+Default composition comes from THE RECORD, not a playbook. Across the graded
+log, Value legs have out-performed their predicted rate while Longshot legs
+have badly under-performed, so the default ticket is Anchor + Value(s) and
+skips longshots. Ask for `strategy="boom"` if you want the lottery ticket.
 
-Diversification rules (straight from the infographic's "what to avoid"):
-  - no two legs from the same game (avoid stacking one environment),
-  - prefer different archetypes (not all pull/loft, not all raw-power),
-  - don't stack three chalk bombs or three pure longshots — the role mix does this.
+Diversification: no two legs from the same game (one weather/park/pitcher
+environment shouldn't decide the whole ticket) and prefer different power
+archetypes.
 
-Each ticket gets a 10-point checklist and a green/yellow/red light, plus combined
-odds, model true probability, and EV computed from the book odds in odds.py.
+Each ticket gets combined odds, the model's true win probability (per-leg
+probabilities scaled by the learned role reliability), EV vs the actual price,
+and a data-driven quality checklist with a green/yellow/red light.
 """
 
 from __future__ import annotations
@@ -42,12 +40,27 @@ from .odds import (
     format_american,
 )
 
-# Probability bands -> role (aligned to the infographic's odds ranges).
+# Probability bands -> role (these mirror the season-HR tier bands).
 ANCHOR_MIN_PROB = 0.15      # ~ +560 or shorter
 VALUE_MIN_PROB = 0.10       # ~ +900 .. +560
 LONGSHOT_MIN_PROB = 0.045   # ~ +2000 .. +900
 
+# Record-driven composition: Value legs have beaten their predicted hit rate in
+# the graded log while Longshot legs have badly missed theirs, so the default
+# ticket leans Anchor + Value and does NOT force a longshot in.
 COMPOSITIONS = {
+    1: ["Anchor"],
+    2: ["Anchor", "Value"],
+    3: ["Anchor", "Value", "Value"],
+    4: ["Anchor", "Anchor", "Value", "Value"],
+    5: ["Anchor", "Anchor", "Value", "Value", "Value"],
+}
+
+# The ULX playbook's composition — Anchor + Value + Deep-Space Longshot, the
+# canonical ULX ticket. Kept as its own strategy so both philosophies are
+# available: `strategy="ulx"` builds the playbook ticket, `strategy="model"`
+# builds what the graded record says has actually been cashing.
+ULX_COMPOSITIONS = {
     1: ["Anchor"],
     2: ["Anchor", "Value"],
     3: ["Anchor", "Value", "Longshot"],
@@ -97,7 +110,7 @@ def role_fit(row: pd.Series, role: str) -> float:
     """How good a player is *for a given role*.
 
     Blends the role's headline score with a lineup-spot bonus (Anchor wants 3-5,
-    Value 6-7, Longshot 7-9 — per the ULX playbook) and a recurring-history bonus
+    Value 6-7, Longshot 7-9) and a recurring-history bonus
     for bats that have actually homered from the spot they're hitting today.
     """
     spot = row.get("lineup_spot")
@@ -170,7 +183,7 @@ def _pick(pool: pd.DataFrame, used_games: set, used_arch: set,
     return None
 
 
-def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "ulx",
+def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "model",
                     max_per_game: int = 1, diversify_arch: bool = True,
                     seed: int | None = None) -> dict:
     """Build a parlay. Returns {legs: DataFrame, summary: dict, checklist: list}.
@@ -195,8 +208,8 @@ def generate_parlay(df: pd.DataFrame, n_legs: int = 3, strategy: str = "ulx",
         used_arch.add(row["archetype"])
         used_players.add(row["player"])
 
-    if strategy == "ulx":
-        comp = COMPOSITIONS[n_legs]
+    if strategy in ("model", "ulx"):
+        comp = (ULX_COMPOSITIONS if strategy == "ulx" else COMPOSITIONS)[n_legs]
         for role in comp:
             pool = df[(df["role"] == role) & (~df["player"].isin(used_players))]
             if not pool.empty:
@@ -282,19 +295,32 @@ def _summarize(legs: pd.DataFrame, n_legs: int) -> tuple[dict, list]:
     games = set(legs["game"])
     spots = set(legs["lineup_spot"].dropna()) if "lineup_spot" in legs else set()
     n = len(legs)
+    probs = pd.to_numeric(legs["hr_prob_game"], errors="coerce")
+    _mean = lambda col, d: (pd.to_numeric(legs[col], errors="coerce").mean()
+                            if col in legs else d)
+    # Data-driven quality checks: measured signal and the graded record, not a
+    # checklist of profile minimums.
     checks = [
+        # ULX role composition: bet the profile, not the name.
         ("Anchor identified", "Anchor" in roles),
         ("Value bat found", "Value" in roles or n == 1),
-        ("Longshot selected", "Longshot" in roles or n < 3),
-        ("Different archetypes", len(archs) >= min(n, 2)),
-        ("Different games (no stacking)", len(games) == n),
+        ("Form / hard contact", _mean("recent_form_score", 50) >= 45
+         or _mean("hard_hit_score", 50) >= 55),
+        # Every leg clears the record's realistic floor — no dead legs.
+        ("No dead legs (every leg ≥ 8% model HR)", bool((probs >= 0.08).all())),
+        # At least one genuinely strong bat carries the ticket.
+        ("Carried by a strong bat (top leg ≥ 20%)", bool(probs.max() >= 0.20)),
+        # Longshots have badly under-performed in the graded record.
+        ("No record-fading longshots", not (legs["role"] == "Longshot").any() or n < 3),
+        ("Different games (uncorrelated)", len(games) == n),
+        ("Different power archetypes", len(archs) >= min(n, 2)),
         ("Different lineup spots", len(spots) >= min(n, 3) or len(spots) == n),
-        ("Good matchups", legs["matchup_score"].mean() >= 52),
-        ("Favorable HR environment", legs["env_score"].mean() >= 50),
-        ("Reasonable odds (no crazy legs)", bool((legs["book_odds"] <= 2200).all())),
-        ("Form / hard contact", legs.get("recent_form_score", pd.Series([50])).mean() >= 45
-         or legs.get("hard_hit_score", pd.Series([50])).mean() >= 55),
-        ("Makes sense (live model prob)", model_prob >= (0.03 if n >= 4 else 0.06)),
+        ("Real batted-ball power (barrels)", _mean("barrel_score", 50) >= 55),
+        ("Contact quality holding or rising", _mean("barrel_trend", 0) >= -1.0),
+        ("Matchup edge (starter + bullpen)", _mean("matchup_score", 50) >= 52),
+        ("Favorable park / weather", _mean("env_score", 50) >= 50),
+        ("Priced sanely (no lottery legs)", bool((legs["book_odds"] <= 2200).all())),
+        ("Ticket win% clears the bar", model_prob >= (0.03 if n >= 4 else 0.06)),
     ]
     passed = sum(1 for _, ok in checks if ok)
     total = len(checks)
