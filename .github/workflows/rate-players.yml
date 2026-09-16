@@ -1,0 +1,39 @@
+name: Rate my players
+
+# On-demand: runs the FULL live model (live lineups, Statcast/FanGraphs metrics,
+# every signal, live odds if ODDS_API_KEY is set) against a SPECIFIC list of
+# bats, then splits them into diversified parlays. Runners have open network,
+# so this produces REAL ratings — sandboxes without egress cannot.
+
+on:
+  workflow_dispatch:
+    inputs:
+      players:
+        description: 'Comma-separated, optional prices: "Pete Alonso +310, Riley Greene +280"'
+        required: true
+      date:
+        description: "Slate date (YYYY-MM-DD), defaults to today (UTC)"
+        required: false
+
+jobs:
+  rate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rate the players
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          DATE="${{ github.event.inputs.date || '' }}"
+          if [ -z "$DATE" ]; then DATE="$(date -u +%F)"; fi
+          python scripts/rate_players.py "$DATE" "${{ github.event.inputs.players }}"
