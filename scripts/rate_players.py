@@ -154,7 +154,12 @@ def main() -> None:
     scored = attach_trend_signals(scored, events, game_date.strftime("%A"))
     scored = attach_odds(scored, date_iso, use_live=True)
     scored["_key"] = scored["player"].map(normalize_name)
-    print(f"GAMES: {scored['game'].nunique()} | HITTERS: {len(scored)}\n")
+    live_odds = (bool(scored["odds_is_live"].any())
+                 if "odds_is_live" in scored.columns else False)
+    odds_label = ("LIVE book prices" if live_odds else
+                  "MODEL-IMPLIED (tier-banded) — NOT real market prices")
+    print(f"GAMES: {scored['game'].nunique()} | HITTERS: {len(scored)} | "
+          f"ODDS: {odds_label}\n")
 
     rows, missing = [], []
     for key, display, odds in want:
@@ -175,8 +180,10 @@ def main() -> None:
     print("=" * 96)
     print("MODEL RATING — your bats, ranked")
     print("=" * 96)
+    book_hdr = "BOOK" if live_odds else "BOOK*"
     print(f"{'#':>2} {'PLAYER':22} {'HR%':>6} {'SCORE':>6} {'ULX':>10} {'SPOT':>4} "
-          f"{'BRL%':>5} {'HR/FB':>6} {'MAXEV':>6} {'YOURS':>7} {'EDGE':>8}")
+          f"{'BRL%':>5} {'HR/FB':>6} {'MAXEV':>6} {book_hdr:>6} {'YOURS':>7} "
+          f"{'EDGE':>8}")
     for i, x in enumerate(rows, 1):
         r = x["row"]
         spot = r.get("lineup_spot")
@@ -187,7 +194,8 @@ def main() -> None:
               f"{float(r.get('hr_score', 0)):>6.0f} "
               f"{str(r.get('ulx_grade', '—')):>10} {spot_txt:>4} "
               f"{_fmt(r.get('barrel_pct')):>5} {_fmt(r.get('hr_fb')):>6} "
-              f"{_fmt(r.get('max_ev')):>6} {mine:>7} {edge:>8}")
+              f"{_fmt(r.get('max_ev')):>6} "
+              f"{format_american(r.get('book_odds')):>6} {mine:>7} {edge:>8}")
     for x in rows:
         r = x["row"]
         if r.get("rationale"):
@@ -216,16 +224,22 @@ def main() -> None:
                 d_mine *= dec(x["my_odds"])
             book = format_american(r.get("book_odds"))
             mine = f"+{x['my_odds']}" if x["my_odds"] else "—"
+            tag = "book" if live_odds else "book*"
             print(f"   {x['name']:22} {x['p']*100:>5.1f}%  yours {mine:>6}  "
-                  f"book {book:>6}  {x['game']}")
+                  f"{tag} {book:>6}  {x['game']}")
         line = (f"   TICKET: model win {p*100:.2f}%  fair {to_american(1/p):+d}")
         if has_all_prices:
             ev = (p * d_mine - 1.0) * 100
             line += (f"  |  your price {to_american(d_mine):+d}  "
                      f"$10 pays ${10*(d_mine-1):,.2f}  EV {ev:+.1f}%")
         print(line)
-    print("\nEV is vs the prices on your slip. Positive = the model thinks that "
-          "price is longer than the risk deserves.")
+    print("\nEV is vs the prices on YOUR slip, using the model's probability — "
+          "it does not depend on the book column.")
+    print("Positive = the model thinks your price is longer than the risk deserves.")
+    if not live_odds:
+        print("* BOOK prices are MODEL-IMPLIED tier-band fallbacks, not real "
+              "market prices — no live odds feed was available. Ignore that "
+              "column for shopping; set ODDS_API_KEY for real prices.")
 
 
 if __name__ == "__main__":
