@@ -35,7 +35,7 @@
   }
  ],
  "brier": 0.09501,
- "updated": "2026-10-02",
+ "updated": "2026-10-03",
  "excluded": "excluded 35 leaked date(s) / 8585 rows \u2014 regrade them to put the data back in play",
  "role_factors": {
   "Anchor": 0.948,
