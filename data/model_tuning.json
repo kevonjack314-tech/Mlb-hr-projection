@@ -1,54 +1,54 @@
 {
- "n": 17060,
+ "n": 17096,
  "bins": [
   {
-   "pred": 0.0403,
-   "actual": 0.0459
+   "pred": 0.0402,
+   "actual": 0.0454
   },
   {
    "pred": 0.0654,
-   "actual": 0.0732
+   "actual": 0.0739
   },
   {
    "pred": 0.08,
-   "actual": 0.0825
+   "actual": 0.0824
   },
   {
    "pred": 0.0954,
-   "actual": 0.0896
+   "actual": 0.0894
   },
   {
-   "pred": 0.1128,
-   "actual": 0.1177
+   "pred": 0.1129,
+   "actual": 0.1184
   },
   {
-   "pred": 0.1311,
-   "actual": 0.1355
+   "pred": 0.1312,
+   "actual": 0.1352
   },
   {
-   "pred": 0.1575,
-   "actual": 0.1393
+   "pred": 0.1574,
+   "actual": 0.1376
   },
   {
-   "pred": 0.2216,
-   "actual": 0.1782
+   "pred": 0.2215,
+   "actual": 0.1792
   }
  ],
- "brier": 0.09486,
- "updated": "2026-10-06",
+ "brier": 0.09483,
+ "updated": "2026-10-07",
  "excluded": "excluded 35 leaked date(s) / 8585 rows \u2014 regrade them to put the data back in play",
  "role_factors": {
-  "Anchor": 0.945,
-  "Longshot": 0.923,
-  "Value": 0.977
+  "Anchor": 0.943,
+  "Longshot": 0.935,
+  "Value": 0.976
  },
  "role_n": {
-  "Anchor": 75,
-  "Longshot": 53,
-  "Value": 97
+  "Anchor": 76,
+  "Longshot": 54,
+  "Value": 98
  },
  "feature_model": {
-  "n": 15739,
+  "n": 15775,
   "features": [
    "barrel_pct",
    "brl_pa",
@@ -335,9 +335,9 @@
    -0.05927
   ],
   "intercept": -2.23198,
-  "val_days": 14,
-  "val_brier_model": 0.09036,
-  "val_brier_baseline": 0.09016,
+  "val_days": 15,
+  "val_brier_model": 0.09033,
+  "val_brier_baseline": 0.09002,
   "active": false,
   "note": "trained, not applied \u2014 hand-weighted model still wins on holdout"
  }
