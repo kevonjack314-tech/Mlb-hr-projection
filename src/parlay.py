@@ -151,8 +151,13 @@ def role_fit(row: pd.Series, role: str) -> float:
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["role"] = df.apply(
-        lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1)
+    # A caller that already knows the roles keeps them. The probability bands
+    # below are calibrated to home runs (~12% a game); a sport whose event
+    # happens three times as often needs its own, and assigns them upstream
+    # rather than having every player here read as an Anchor.
+    if "role" not in df.columns or df["role"].isna().all():
+        df["role"] = df.apply(
+            lambda r: assign_role(r["hr_prob_game"], r.get("season_hr")), axis=1)
     df["archetype"] = df.apply(archetype, axis=1)
     return df
 
