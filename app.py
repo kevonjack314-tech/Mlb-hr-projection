@@ -2172,6 +2172,22 @@ def tab_lineups(df, end_iso, prefer_live):
 # --------------------------------------------------------------------------- #
 def main():
     inject_css()
+    # Sport picker first: football and basketball run the same pipeline over a
+    # different event, and the baseball tabs (trends, record, score predictor)
+    # are built on a graded record those sports do not have yet.
+    from src.board_ui import render_sport
+    from src.sports import SPORTS
+    sport = st.sidebar.radio(
+        "Sport", list(SPORTS),
+        format_func=lambda k: f"{SPORTS[k].emoji} {SPORTS[k].label}",
+        key="sport_picker",
+    )
+    if sport != "mlb":
+        import datetime as _dt
+        d = st.sidebar.date_input("Date", _dt.date.today(), key=f"date_{sport}")
+        render_sport(sport, d.isoformat())
+        return
+
     game_date, prefer_live, lookback, half_life, live_odds = sidebar_controls()
     methodology_sidebar()
 

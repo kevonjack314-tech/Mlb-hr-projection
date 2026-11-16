@@ -1,7 +1,52 @@
-# ⚾ MLB Home Run Projection Tool
+# 🎯 Rare-Event Prop Projection Tool — MLB · NFL · NBA
 
-A detailed, transparent dashboard that ranks hitters by **home-run upside** for any
-MLB date. It blends Statcast-style batted-ball quality, recent form, the opposing
+A detailed, transparent dashboard that ranks players by their odds of doing the
+**rare, high-odds thing** — the events worth parlaying. Pick the sport in the
+sidebar:
+
+| Sport | Event | Base rate | Status |
+|---|---|---|---|
+| ⚾ **MLB** | 1+ home run | ~12% / game | **Live data**, 63-day graded record, calibrated |
+| 🏈 **NFL** | Anytime touchdown | ~22% | Model + synthetic slate; live feed not wired yet |
+| 🏀 **NBA** | 3+ made threes | ~35% | Model + synthetic slate; live feed not wired yet |
+
+Each sport targets the same SHAPE of bet — a rare, repeatable, skill-driven
+binary outcome at long odds — and runs the same pipeline: slate → per-player
+probability → parlay construction. The parlay builder, role bands, odds
+handling and diversification rules are **shared** (`src/multisport.py`), so a
+fix lands in all three at once rather than being written three times.
+
+### 🏈 NFL — anytime touchdown
+
+Touchdowns are a **fixed, shared resource**: a team scores ~2.3 a game. The
+model estimates the team's supply from the implied team total, then splits it
+by **role near the goal line** — inside-the-5 carries and red-zone targets —
+not by yardage. A 20%-snap goal-line back beats an every-down receiver who
+never sees the red zone. Bad weather **moves** touchdowns from the air to the
+ground rather than deleting them. Shares are normalised against the team's
+supply; without that pass the board handed out up to **1.6×** the touchdowns a
+team actually scores.
+
+### 🏀 NBA — 3+ made threes
+
+**Minutes first, then attempts, then accuracy** — most public error in these
+props is a minutes error, not a shooting error. Minutes come from the last five
+games (not the season), adjusted for back-to-backs and for a starter being out.
+Attempts scale with pace (the *matchup* average) and the opponent's willingness
+to concede threes. Accuracy is shrunk toward league average on thin samples.
+P(3+) is exact rather than simulated: Poisson attempts × independent conversion
+gives Poisson makes (Poisson thinning), so a fractional attempt projection is
+handled honestly.
+
+> **Football and basketball boards are modelled, not live.** Their data
+> adapters aren't wired up, so the slate is synthetic and prices are the model's
+> own numbers shaded by a typical prop hold — not a market. The app says so on
+> every board.
+
+---
+
+The MLB section below is the original, fully live tool. It ranks hitters by
+**home-run upside** for any MLB date. It blends Statcast-style batted-ball quality, recent form, the opposing
 pitcher matchup, ballpark factors, and live weather into a composite **HR Score**,
 a per-game **HR probability**, and three specialized rankings — **Longshots**,
 **Consistent HR Hitters**, and **Sneaky HR Chances**.
