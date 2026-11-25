@@ -68,12 +68,14 @@ def _pick_card(row: pd.Series, sport: str) -> None:
                       delta_color="off")
 
 
-def render_sport(sport: str, date_iso: str, n_legs: int = 3) -> None:
+def render_sport(sport: str, date_iso: str, n_legs: int = 3,
+                 prefer_live: bool = True) -> None:
     spec = get_sport(sport)
     st.title(f"{spec.emoji} {spec.label}")
     st.caption(spec.notes)
 
-    board, source = build_slate(sport, date_iso)
+    board, source, notes = build_slate(sport, date_iso, prefer_live=prefer_live,
+                                       with_notes=True)
     if board is None or board.empty:
         st.warning("No slate available for this date.")
         return
@@ -83,6 +85,16 @@ def render_sport(sport: str, date_iso: str, n_legs: int = 3) -> None:
 
     live = source.startswith("LIVE")
     st.info(f"{'🟢' if live else '🟡'} **Data source:** {source}")
+    if notes:
+        with st.expander("Data provenance & notes", expanded=False):
+            for n in notes[:8]:
+                st.markdown(f"- {n}")
+    if live:
+        st.caption(
+            "Lines are **real DraftKings numbers** from ESPN. Player prices on "
+            "this board are still **model-implied** — ESPN publishes game "
+            "lines, not player props — so the EV below reflects an assumed "
+            "hold, not an edge against a book.")
     if not live:
         st.warning(
             "**This board is modelled, not live.** The projections come from a "

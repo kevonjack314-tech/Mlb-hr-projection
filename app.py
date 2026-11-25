@@ -2185,7 +2185,8 @@ def main():
     if sport != "mlb":
         import datetime as _dt
         d = st.sidebar.date_input("Date", _dt.date.today(), key=f"date_{sport}")
-        render_sport(sport, d.isoformat())
+        live = st.sidebar.toggle("Try live data", value=True, key=f"live_{sport}")
+        render_sport(sport, d.isoformat(), prefer_live=live)
         return
 
     game_date, prefer_live, lookback, half_life, live_odds = sidebar_controls()

@@ -189,13 +189,12 @@ def score_col(sport: str) -> str:
     return COLUMN_MAP.get(sport, COLUMN_MAP["mlb"])["score"]
 
 
-def build_slate(sport: str, date_iso: str, prefer_live: bool = False):
+def build_slate(sport: str, date_iso: str, prefer_live: bool = False,
+                with_notes: bool = False):
     """One entry point for every sport's board. Returns (scored_df, source).
 
-    Live adapters are not wired yet for football and basketball, so those fall
-    back to the deterministic synthetic slate and SAY SO in the source label —
-    the same guard the baseball pipeline uses to keep modelled numbers from
-    being mistaken for real ones.
+    Every sport keeps the same guard: a synthetic slate is labelled DEMO in the
+    source string, so modelled numbers can never be mistaken for real ones.
     """
     spec = get_sport(sport)
     if spec.key == "mlb":
@@ -203,13 +202,17 @@ def build_slate(sport: str, date_iso: str, prefer_live: bool = False):
 
         from .model import score_slate
         from .sources import get_slate
-        df, source, _notes = get_slate(dt.date.fromisoformat(date_iso),
-                                       prefer_live=prefer_live)
-        return score_slate(df), source
-    if spec.key == "nfl":
-        from .nfl.demo import build_demo_slate
+        df, source, notes = get_slate(dt.date.fromisoformat(date_iso),
+                                      prefer_live=prefer_live)
+        scored = score_slate(df)
+    elif spec.key == "nfl":
         from .nfl.model import score_slate
-        return score_slate(build_demo_slate(date_iso)), "DEMO (synthetic)"
-    from .nba.demo import build_demo_slate
-    from .nba.model import score_slate
-    return score_slate(build_demo_slate(date_iso)), "DEMO (synthetic)"
+        from .nfl.sources import get_slate
+        df, source, notes = get_slate(date_iso, prefer_live=prefer_live)
+        scored = score_slate(df)
+    else:
+        from .nba.model import score_slate
+        from .nba.sources import get_slate
+        df, source, notes = get_slate(date_iso, prefer_live=prefer_live)
+        scored = score_slate(df)
+    return (scored, source, notes) if with_notes else (scored, source)
