@@ -7,8 +7,8 @@ sidebar:
 | Sport | Event | Base rate | Status |
 |---|---|---|---|
 | ⚾ **MLB** | 1+ home run | ~12% / game | **Live data**, 63-day graded record, calibrated |
-| 🏈 **NFL** | Anytime touchdown | ~22% | Model + synthetic slate; live feed not wired yet |
-| 🏀 **NBA** | 3+ made threes | ~35% | Model + synthetic slate; live feed not wired yet |
+| 🏈 **NFL** | Anytime touchdown | ~22% | **Live** — ESPN rosters + real DraftKings lines |
+| 🏀 **NBA** | 3+ made threes | ~35% | **Live** — ESPN rosters + real DraftKings lines |
 
 Each sport targets the same SHAPE of bet — a rare, repeatable, skill-driven
 binary outcome at long odds — and runs the same pipeline: slate → per-player
@@ -38,10 +38,32 @@ P(3+) is exact rather than simulated: Poisson attempts × independent conversion
 gives Poisson makes (Poisson thinning), so a fractional attempt projection is
 handled honestly.
 
-> **Football and basketball boards are modelled, not live.** Their data
-> adapters aren't wired up, so the slate is synthetic and prices are the model's
-> own numbers shaded by a typical prop hold — not a market. The app says so on
-> every board.
+### Live data (NFL & NBA)
+
+Both pull from **ESPN's public API** — free, keyless, and the closest thing to
+MLB StatsAPI these sports have (`src/espn.py`):
+
+- **Real DraftKings spreads and totals**, split into **implied team totals**.
+  For football that's the single biggest input to a touchdown projection: it
+  already contains everything the market knows about injuries and matchup.
+- **Venue** (with an `indoor` flag) and **game weather**.
+- **Per-player season rates.** Football has no public red-zone or inside-the-5
+  splits anywhere free — but each player's share of the touchdowns his team has
+  *already scored*, split by rush and receive, is that goal-line role revealed.
+  It's weighted by how many touchdowns actually produced it, **per component**:
+  a team can have 30 touchdowns and only 4 of them rushing, and weighing a 0.75
+  rushing share against the 30 prices a quarterback's three sneaks like a
+  goal-line back.
+- Players on IR, out, or practice squad are dropped before scoring.
+
+A full slate is ~20s (a few hundred threaded athlete calls). Any failure
+degrades to the synthetic slate and says so — a modelled board can never claim
+to be live.
+
+> **Player prices are still model-implied.** ESPN publishes *game* lines, not
+> player props, so the odds on these boards are the model's own numbers shaded
+> by a typical prop hold. EV reflects that assumed hold, not an edge against a
+> book. The app says so on every board.
 
 ---
 

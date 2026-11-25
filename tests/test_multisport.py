@@ -155,9 +155,12 @@ def test_the_app_renders_each_sport_without_error(sport, expect):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(_APP, default_timeout=300).run()
     at.sidebar.radio(key="sport_picker").set_value(sport).run()
+    # Force the synthetic path so the test does not depend on ESPN being
+    # reachable — and so it can assert the thing that actually matters: a
+    # modelled board must announce itself as modelled.
+    at.sidebar.toggle(key=f"live_{sport}").set_value(False).run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     assert any(expect in t.value for t in at.title)
-    # The synthetic board has to announce itself as synthetic.
     assert any("modelled, not live" in w.value for w in at.warning)
     assert at.dataframe, "no board rendered"
 

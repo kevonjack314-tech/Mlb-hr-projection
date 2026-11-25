@@ -136,6 +136,41 @@ def td_share(row: pd.Series) -> dict:
     trust = min(1.0, have / 3.0)
     share = trust * share + (1.0 - trust) * prior * snap
 
+    # OBSERVED touchdown share, when the season is far enough along to mean
+    # something. Inside-the-5 carries and red-zone targets are the inputs we
+    # actually want, and no free public feed carries them — but a player's
+    # share of the touchdowns his team has already scored IS his goal-line
+    # role, revealed.
+    #
+    # Trust is measured PER COMPONENT, against the number of touchdowns that
+    # component has actually produced — not against the team's total. A team
+    # can have 30 touchdowns and only 4 of them rushing; weighing a 0.75
+    # rushing share by the 30 treats three quarterback sneaks as a settled
+    # fact and prices the quarterback like a goal-line back.
+    obs_rush = _num(row.get("season_rush_td_share"))
+    obs_rec = _num(row.get("season_rec_td_share"))
+    n_rush = _num(row.get("team_season_rush_tds"))
+    n_rec = _num(row.get("team_season_rec_tds"))
+    if n_rush is None or n_rec is None:
+        # Older callers pass only the combined count; split it on the league
+        # mix rather than trusting either component fully.
+        total_obs = _num(row.get("team_season_tds")) or 0.0
+        n_rush = n_rush if n_rush is not None else total_obs * 0.45
+        n_rec = n_rec if n_rec is not None else total_obs * 0.55
+
+    def _blend(observed, n_events, modelled):
+        """Weight an observed share by how many events produced it."""
+        if observed is None or not n_events:
+            return modelled
+        t = float(np.clip(n_events / (n_events + 8.0), 0.0, 0.8))
+        return t * observed + (1.0 - t) * modelled
+
+    rush_td_share = _blend(obs_rush, n_rush, rush_td_share)
+    rec_td_share = _blend(obs_rec, n_rec, rec_td_share)
+    observed_share = rush_pool * rush_td_share + pass_pool * rec_td_share
+    if obs_rush is not None or obs_rec is not None:
+        share = observed_share
+
     return {"td_share": float(np.clip(share, 0.0, 0.75)),
             "rush_pool": round(rush_pool, 3), "pass_pool": round(pass_pool, 3),
             "weather_note": wx["weather_note"]}
